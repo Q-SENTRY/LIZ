@@ -1,7 +1,8 @@
 /* Editor de hojas de cálculo (SheetJS) con fórmulas básicas */
 const ExcelEditor = (() => {
   const { el, toast, prompt, choose, confirm } = UI;
-  const MAX_ROWS = 3000, MAX_COLS = 120;
+  const MAX_ROWS = 100000, MAX_COLS = 200;
+  const ROW_H = 32, WINDOW_EXTRA = 30;   // filas dibujadas fuera de pantalla
 
   /* ---------- Evaluador de fórmulas ---------- */
   class FErr { constructor(code) { this.code = code; } }
@@ -262,7 +263,8 @@ const ExcelEditor = (() => {
   }
 
   function create(ctx) {
-    let wb, sheetIdx = 0, sel = { r: 0, c: 0 }, fontScale = 1, srcExt = 'xlsx';
+    let wb, sheetIdx = 0, sel = { r: 0, c: 0 }, zoom = 1, srcExt = 'xlsx';
+    let win = { first: 0, last: -1 }, totalRows = 0, totalCols = 0, scrollRaf = 0;
     let grid, table, refBox, input, tabs, note;
 
     const ws = () => wb.Sheets[wb.SheetNames[sheetIdx]];
@@ -289,31 +291,61 @@ const ExcelEditor = (() => {
       };
     }
 
+    /* Se dibujan solo las filas visibles (más un margen): hojas enormes no trancan el celular */
+    const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    function rowHtml(r) {
+      const s = ws();
+      let h = `<tr><th class="rh" data-r="${r}">${r + 1}</th>`;
+      for (let c = 0; c < totalCols; c++) {
+        const cell = s[addr(r, c)];
+        let cls = '';
+        if (cell) {
+          if (cell.t === 'n') cls = 'num';
+          if (cell.f && (cell.v === undefined || cell.v === null)) cls += ' formula';
+        }
+        if (r === sel.r && c === sel.c) cls += ' sel';
+        h += `<td data-r="${r}" data-c="${c}"${cls ? ` class="${cls.trim()}"` : ''}>${esc(cellText(cell))}</td>`;
+      }
+      return h + '</tr>';
+    }
+    function wantedWindow() {
+      const rowPx = ROW_H * zoom;
+      const top = Math.max(0, grid.scrollTop / rowPx - 1);
+      const visible = Math.ceil(grid.clientHeight / rowPx) + 1;
+      const first = Math.max(0, Math.floor(top) - WINDOW_EXTRA);
+      const last = Math.min(totalRows - 1, Math.floor(top) + visible + WINDOW_EXTRA);
+      return { first, last };
+    }
+    function renderRows(force) {
+      const w = wantedWindow();
+      if (!force && w.first >= win.first && w.last <= win.last && w.first - win.first < WINDOW_EXTRA * 1.5) return;
+      win = w;
+      let h = '';
+      if (w.first > 0) h += `<tr class="xl-spacer"><td colspan="${totalCols + 1}" style="height:${w.first * ROW_H}px"></td></tr>`;
+      for (let r = w.first; r <= w.last; r++) h += rowHtml(r);
+      if (w.last < totalRows - 1) h += `<tr class="xl-spacer"><td colspan="${totalCols + 1}" style="height:${(totalRows - 1 - w.last) * ROW_H}px"></td></tr>`;
+      table.tBodies[0].innerHTML = h;
+      const rh = table.querySelector(`th[data-r="${sel.r}"]`);
+      if (rh) rh.classList.add('hl');
+    }
     function render() {
-      const d = dims(), s = ws();
-      const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      const d = dims();
+      totalRows = d.rows; totalCols = d.cols;
       let h = '<thead><tr><th class="rh"></th>';
       for (let c = 0; c < d.cols; c++) h += `<th data-c="${c}">${XLSX.utils.encode_col(c)}</th>`;
-      h += '</tr></thead><tbody>';
-      for (let r = 0; r < d.rows; r++) {
-        h += `<tr><th class="rh" data-r="${r}">${r + 1}</th>`;
-        for (let c = 0; c < d.cols; c++) {
-          const cell = s[addr(r, c)];
-          let cls = '';
-          if (cell) {
-            if (cell.t === 'n') cls = 'num';
-            if (cell.f && (cell.v === undefined || cell.v === null)) cls += ' formula';
-          }
-          h += `<td data-r="${r}" data-c="${c}"${cls ? ` class="${cls.trim()}"` : ''}>${esc(cellText(cell))}</td>`;
-        }
-        h += '</tr>';
-      }
-      table.innerHTML = h + '</tbody>';
-      table.style.fontSize = 14 * fontScale + 'px';
+      table.innerHTML = h + '</tr></thead><tbody></tbody>';
+      table.style.zoom = zoom;
+      win = { first: 0, last: -1 };
+      renderRows(true);
       note.textContent = d.truncated ? `Se muestran las primeras ${MAX_ROWS} filas y ${MAX_COLS} columnas (el resto se conserva al guardar).` : '';
       note.hidden = !d.truncated;
       renderTabs();
       select(Math.min(sel.r, d.rows - 1), Math.min(sel.c, d.cols - 1), false);
+    }
+    function setZoom(z) {
+      zoom = Math.max(0.5, Math.min(2.5, z));
+      table.style.zoom = zoom;
+      renderRows(true);
     }
 
     function renderTabs() {
@@ -366,6 +398,11 @@ const ExcelEditor = (() => {
       table.querySelectorAll('.sel').forEach(x => x.classList.remove('sel'));
       table.querySelectorAll('.hl').forEach(x => x.classList.remove('hl'));
       sel = { r, c };
+      if (r < win.first || r > win.last) {
+        // fila fuera de lo dibujado: desplazar hasta ella y dibujar esa zona
+        grid.scrollTop = Math.max(0, (r - 3) * ROW_H * zoom);
+        renderRows(true);
+      }
       const td = tdAt(r, c);
       if (td) {
         td.classList.add('sel');
@@ -380,19 +417,59 @@ const ExcelEditor = (() => {
       }
       refBox.textContent = addr(r, c);
       const cell = ws()[addr(r, c)];
-      input.value = !cell ? '' : cell.f ? '=' + cell.f : cell.t === 'b' ? (cell.v ? 'VERDADERO' : 'FALSO') : cell.v != null ? (cell.t === 'n' && !cell.z ? String(cell.v) : cellText(cell)) : '';
+      input.value = editText(cell);
       input.dataset.orig = input.value;
       if (focusInput) input.focus();
+    }
+
+    /** Texto que se muestra al editar una celda: números sin separadores de miles ni símbolos (fáciles de corregir) */
+    function editText(cell) {
+      if (!cell) return '';
+      if (cell.f) return '=' + cell.f;
+      if (cell.t === 'b') return cell.v ? 'VERDADERO' : 'FALSO';
+      if (cell.v == null) return '';
+      if (cell.t === 'n') {
+        const z = cell.z || '';
+        if (z && XLSX.SSF.is_date(z)) return cellText(cell);                  // fechas: como se ven
+        if (/%/.test(z)) return +(cell.v * 100).toPrecision(12) + '%';          // porcentajes
+        return String(+cell.v.toPrecision(15));                                // número limpio
+      }
+      return cellText(cell);
+    }
+
+    /** Convierte "1,500" / "1.500,25" / "1,5" / "$2,000.00" en número, o null si no es número */
+    function parseNumber(t) {
+      let s = t.replace(/[\s\u00a0]/g, '').replace(/^[\$€£¥]|[\$€£¥]$|^(COP|USD|EUR|MXN|ARS|CLP|PEN)|(COP|USD|EUR|MXN|ARS|CLP|PEN)$/gi, '');
+      let neg = false;
+      if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+      if (/^[-+]?\d+$/.test(s)) return (neg ? -1 : 1) * parseFloat(s);
+      if (/^[-+]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) return (neg ? -1 : 1) * parseFloat(s.replace(/,/g, ''));            // 1,500 · 1,234,567.89
+      if (/^[-+]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) return (neg ? -1 : 1) * parseFloat(s.replace(/\./g, '').replace(',', '.')); // 1.500 · 1.234.567,89
+      if (/^[-+]?\d*\.\d+$/.test(s)) return (neg ? -1 : 1) * parseFloat(s);                                                   // 1.5
+      if (/^[-+]?\d*,\d+$/.test(s)) return (neg ? -1 : 1) * parseFloat(s.replace(',', '.'));                                  // 1,5 (decimal con coma)
+      return null;
+    }
+    /** "20/04/2026", "2026-04-20", "20-04-2026" -> número de serie de Excel */
+    function parseDate(t) {
+      let m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/), y, mo, d;
+      if (m) { d = +m[1]; mo = +m[2]; y = +m[3]; if (y < 100) y += 2000; if (mo > 12 && d <= 12) [d, mo] = [mo, d]; }
+      else if ((m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+      else return null;
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+      const dt = new Date(Date.UTC(y, mo - 1, d));
+      if (dt.getUTCMonth() !== mo - 1) return null;
+      return { v: (dt - EPOCH) / 864e5, z: m[0].includes('-') && m[1].length === 4 ? 'yyyy-mm-dd' : 'dd/mm/yyyy' };
     }
 
     function parseInput(txt) {
       const t = txt.trim();
       if (t === '') return null;
       if (t.startsWith('=') && t.length > 1) return { f: toEnglish(t.slice(1)) };
-      if (/^-?\d+([.,]\d+)?$/.test(t)) return { t: 'n', v: parseFloat(t.replace(',', '.')) };
-      if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) return { t: 'n', v: parseFloat(t.replace(/\./g, '').replace(',', '.')) };
-      if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) return { t: 'n', v: parseFloat(t.replace(/,/g, '')) };
-      if (/^-?\d+([.,]\d+)?\s*%$/.test(t)) return { t: 'n', v: parseFloat(t.replace(',', '.')) / 100, z: '0%' };
+      if (/^[-+]?[\d.,]+\s*%$/.test(t)) { const n = parseNumber(t.replace('%', '')); if (n !== null) return { t: 'n', v: n / 100, z: '0%' }; }
+      const date = parseDate(t);
+      if (date) return { t: 'n', v: date.v, z: date.z, isDate: true };
+      const n = parseNumber(t);
+      if (n !== null) return { t: 'n', v: n, money: /[\$€£¥]|COP|USD|EUR/i.test(t) };
       const up = t.toUpperCase();
       if (up === 'VERDADERO' || up === 'TRUE') return { t: 'b', v: true };
       if (up === 'FALSO' || up === 'FALSE') return { t: 'b', v: false };
@@ -406,7 +483,11 @@ const ExcelEditor = (() => {
       if (!parsed) delete s[a];
       else {
         const cell = { ...parsed };
-        if (prev && prev.z && cell.t === 'n' && !cell.z) cell.z = prev.z;
+        // conservar el formato de la celda (fecha, moneda, porcentaje); si no tenía, usar uno adecuado
+        if (cell.t === 'n' && !cell.z && prev && prev.z && prev.z !== 'General') cell.z = prev.z;
+        if (cell.isDate && prev && prev.z && XLSX.SSF.is_date(prev.z)) cell.z = prev.z;
+        if (cell.money && !cell.z) cell.z = '"$"#,##0.00';
+        delete cell.isDate; delete cell.money;
         if (prev && prev.s) cell.s = prev.s;
         if (cell.f) setResult(cell, () => evaluate(cell.f, env()));
         s[a] = cell;
@@ -528,8 +609,8 @@ const ExcelEditor = (() => {
         UI.tbBtn('rows', 'Más filas', () => { ws()._extraRows = dims().rows + 20; render(); }, { label: 'Filas' }),
         UI.tbBtn('cols', 'Más columnas', () => { ws()._extraCols = dims().cols + 5; render(); }, { label: 'Columnas' }),
         el('span', { class: 'tb-sep' }),
-        UI.tbBtn('textDown', 'Texto más pequeño', () => { fontScale = Math.max(0.6, fontScale - 0.15); table.style.fontSize = 14 * fontScale + 'px'; }),
-        UI.tbBtn('textUp', 'Texto más grande', () => { fontScale = Math.min(2, fontScale + 0.15); table.style.fontSize = 14 * fontScale + 'px'; })
+        UI.tbBtn('minus', 'Alejar', () => setZoom(zoom / 1.2)),
+        UI.tbBtn('plus', 'Acercar', () => setZoom(zoom * 1.2))
       );
     }
 
@@ -576,6 +657,7 @@ const ExcelEditor = (() => {
       });
       table.addEventListener('dblclick', () => input.focus());
       grid = el('div', { class: 'xl-grid-wrap' }, table);
+      grid.addEventListener('scroll', () => { cancelAnimationFrame(scrollRaf); scrollRaf = requestAnimationFrame(() => renderRows(false)); }, { passive: true });
       tabs = el('div', { class: 'xl-tabs' });
       note = el('div', { class: 'xl-note' });
       ctx.workspace.append(el('div', { class: 'xl-wrap' }, el('div', { class: 'xl-bar' }, refBox, input, ok), note, grid, tabs));
@@ -650,6 +732,7 @@ const ExcelEditor = (() => {
     }
 
     const api = {
+      zoom: { get: () => zoom, set: z => setZoom(z), min: 0.5, max: 2.5, target: () => table, scroller: () => grid, cssZoom: true },
       printable,
       open, save, destroy() { ctx.workspace.style.overflow = ''; }, ext: 'xlsx', kind: 'excel',
       formats: [{ label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'CSV de la hoja actual (.csv)', value: 'csv' }, { label: 'OpenDocument (.ods)', value: 'ods' }]

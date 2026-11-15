@@ -266,9 +266,15 @@ const WordEditor = (() => {
         ['pic', 'http://schemas.openxmlformats.org/drawingml/2006/picture']]) {
         if (!new RegExp(`xmlns:${pfx}=`).test(root)) root = root.replace(/>$/, ` xmlns:${pfx}="${uri}">`);
       }
-      const bodyEnd = orig.lastIndexOf('</w:body>');
-      const sectMatch = orig.slice(0, bodyEnd).match(/<w:sectPr\b[\s\S]*?<\/w:sectPr>\s*$/) || orig.slice(0, bodyEnd).match(/<w:sectPr\b[^>]*\/>\s*$/);
-      const sect = sectMatch ? sectMatch[0] : '';
+      // configuración de página final: el <w:sectPr> que es hijo directo de <w:body>
+      // (los documentos con varias secciones tienen otros sectPr dentro de párrafos, que no deben copiarse)
+      let sect = '';
+      try {
+        const xd = new DOMParser().parseFromString(orig, 'application/xml');
+        const bodyEl = xd.getElementsByTagNameNS(W, 'body')[0];
+        const last = bodyEl && [...bodyEl.children].reverse().find(c => c.localName === 'sectPr');
+        if (last) sect = new XMLSerializer().serializeToString(last);
+      } catch { sect = ''; }
 
       // estilos: usar los ids del documento (en Word en español "heading 1" puede llamarse "Ttulo1")
       const stylesPath = 'word/styles.xml';
@@ -449,7 +455,15 @@ const WordEditor = (() => {
 
   /* ---------- Editor ---------- */
   function create(ctx) {
-    let page, base = null, srcExt = 'docx';
+    let page, base = null, srcExt = 'docx', zoom = 1;
+    function setZoom(z) {
+      zoom = Math.max(0.6, Math.min(3, z));
+      page.style.zoom = zoom;        // el texto se agranda y se reacomoda al ancho disponible
+      // los márgenes de la hoja se mantienen del mismo tamaño en pantalla
+      if (!page._pad) { page.style.padding = ''; const cs = getComputedStyle(page); page._pad = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map(parseFloat); }
+      page.style.padding = page._pad.map(v => v / zoom + 'px').join(' ');
+      markPages();
+    }
 
     const cmd = (c, v = null) => { page.focus(); document.execCommand(c, false, v); ctx.dirty(); updateState(); };
 
@@ -565,6 +579,7 @@ const WordEditor = (() => {
       }
       try { document.execCommand('styleWithCSS', false, false); } catch {}
       page.addEventListener('input', () => ctx.dirty());
+      page.addEventListener('paste', onPaste);
       document.addEventListener('selectionchange', onSel);
       measure();
       page.addEventListener('input', scheduleMeasure);
@@ -599,22 +614,25 @@ const WordEditor = (() => {
       estPages = Math.max(1, Math.ceil((contentH - 4) / 864));
       markPages();
     }
-    const pageH = () => page.scrollHeight / estPages;
-    function markPages() { if (page) page.style.setProperty('--pg', pageH() + 'px'); }
+    // alturas visuales (funcionan igual con o sin zoom)
+    const visH = () => page.getBoundingClientRect().height;
+    const pageVis = () => visH() / estPages;
+    function markPages() { if (page) page.style.setProperty('--pg', (visH() / zoom) / estPages + 'px'); }
+    const offsetIn = node => node.getBoundingClientRect().top - ctx.workspace.getBoundingClientRect().top + ctx.workspace.scrollTop;
     function scheduleMeasure() { clearTimeout(measureTimer); measureTimer = setTimeout(measure, 700); }
     const pagesApi = {
       label: 'Página', approx: true,
       count: () => estPages,
       current() {
         const ws = ctx.workspace;
-        const y = ws.scrollTop - page.offsetTop + ws.clientHeight * 0.35;
-        return Math.max(0, Math.min(this.count() - 1, Math.floor(y / pageH())));
+        const y = ws.scrollTop - offsetIn(page) + ws.clientHeight * 0.35;
+        return Math.max(0, Math.min(this.count() - 1, Math.floor(y / pageVis())));
       },
-      goTo(i) { ctx.workspace.scrollTo({ top: page.offsetTop + i * pageH() - 8, behavior: 'smooth' }); },
+      goTo(i) { ctx.workspace.scrollTo({ top: offsetIn(page) + i * pageVis() - 8, behavior: 'smooth' }); },
       outline() {
         return [...page.querySelectorAll('h1, h2, h3')].filter(h => h.textContent.trim()).map(h => ({
           level: +h.tagName[1], text: h.textContent.trim().slice(0, 80),
-          go: () => ctx.workspace.scrollTo({ top: h.offsetTop + page.offsetTop - 16, behavior: 'smooth' })
+          go: () => ctx.workspace.scrollTo({ top: offsetIn(h) - 16, behavior: 'smooth' })
         }));
       }
     };
@@ -623,7 +641,34 @@ const WordEditor = (() => {
       return { node, page: '@page { size: letter; margin: 2cm 2.2cm; }' };
     }
 
+    /* Pegar: se limpia el HTML de otras apps y las imágenes pegadas se insertan incrustadas */
+    async function onPaste(e) {
+      const dt = e.clipboardData;
+      if (!dt) return;
+      const imgFile = [...dt.files].find(f => f.type.startsWith('image/'));
+      const html = dt.getData('text/html');
+      if (imgFile && !html) {
+        e.preventDefault();
+        const url = await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(imgFile); });
+        document.execCommand('insertHTML', false, `<img src="${url}">`);
+        ctx.dirty();
+        return;
+      }
+      if (html) {
+        e.preventDefault();
+        let clean = Importers.sanitizeHtml(html.replace(/<!--[\s\S]*?-->/g, ''));
+        // imágenes externas no se pueden guardar en el .docx sin internet: se quitan
+        const tmp = document.createElement('div');
+        tmp.innerHTML = clean;
+        tmp.querySelectorAll('img').forEach(im => { if (!/^data:image\//.test(im.getAttribute('src') || '')) im.remove(); });
+        tmp.querySelectorAll('[style]').forEach(n => { n.style.removeProperty('font-family'); n.style.removeProperty('line-height'); n.style.removeProperty('background'); n.style.removeProperty('position'); });
+        document.execCommand('insertHTML', false, tmp.innerHTML);
+        ctx.dirty();
+      }
+    }
+
     const api = {
+      zoom: { get: () => zoom, set: z => setZoom(z), min: 0.6, max: 3, target: () => page, cssZoom: true },
       pages: pagesApi, printable,
       open, save, ext: 'docx', kind: 'word',
       destroy() { document.removeEventListener('selectionchange', onSel); window.removeEventListener('resize', markPages); },

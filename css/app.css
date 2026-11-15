@@ -352,6 +352,7 @@ table.xl th.hl { color: var(--ink); background: var(--surface-3); }
 }
 .xl-tab.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
 .xl-add { padding: 7px 10px; }
+.xl-spacer td { padding: 0 !important; border: 0 !important; min-width: 0 !important; background: none; }
 .xl-note { padding: 6px 12px; font-size: 12px; color: var(--muted); background: var(--bg); }
 .xl-note[hidden] { display: none; }
 
@@ -376,7 +377,7 @@ table.xl th.hl { color: var(--ink); background: var(--surface-3); }
 @media (min-width: 700px) { .word-page { padding: 72px 80px; } }
 
 /* =================== PowerPoint =================== */
-.ppt-list { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 10px 100px; }
+.ppt-list { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 10px 100px; min-width: min-content; }
 .ppt-slide { position: relative; overflow: hidden; background: #fff; box-shadow: var(--page-shadow); flex: none; color: #000; border-radius: 3px; }
 .ppt-slide.current { box-shadow: 0 0 0 2px var(--ink), var(--page-shadow); }
 .ppt-shape { position: absolute; display: flex; flex-direction: column; overflow: visible; }
@@ -456,7 +457,8 @@ table.xl th.hl { color: var(--ink); background: var(--surface-3); }
 /* =================== Estructura del editor =================== */
 #editor { position: relative; }
 .editor-body { flex: 1; display: flex; min-height: 0; position: relative; }
-.workspace { min-width: 0; }
+.workspace { min-width: 0; touch-action: pan-x pan-y; }   /* el pellizco lo maneja la app (zoom del documento, no de la interfaz) */
+.xl-grid-wrap { touch-action: pan-x pan-y; }
 #printRoot { display: none; }
 
 /* Miniaturas (panel lateral en pantallas anchas) */

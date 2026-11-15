@@ -260,6 +260,77 @@
     if (obs) obs.disconnect();
   }
 
+  /* ----- Zoom con dos dedos (pellizcar) y Ctrl + rueda ----- */
+  (function setupPinchZoom() {
+    const ws = $('#workspace');
+    let pinch = null, suppressClickUntil = 0, wheelRaf = 0, wheelAcc = 1, wheelAt = null;
+    const Z = () => editor && editor.zoom;
+    const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    /** Aplica un nuevo zoom manteniendo fijo el punto (fx, fy) del área visible */
+    function zoomAround(z, newZoom, sc, fx, fy) {
+      const before = z.get();
+      const cx = sc.scrollLeft + fx, cy = sc.scrollTop + fy;
+      z.set(newZoom);
+      const ratio = z.get() / before;
+      sc.scrollLeft = cx * ratio - fx;
+      sc.scrollTop = cy * ratio - fy;
+      updatePager();
+    }
+    ws.addEventListener('touchstart', e => {
+      const z = Z();
+      if (!z || e.touches.length !== 2) return;
+      e.preventDefault();
+      if (z.cancel) z.cancel();
+      const [a, b] = e.touches;
+      const sc = z.scroller ? z.scroller() : ws, tgt = z.target();
+      const mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
+      const sr = sc.getBoundingClientRect(), tr = tgt.getBoundingClientRect();
+      const local = z.cssZoom ? z.get() : 1;     // el origen de la transformación va en coordenadas propias del elemento
+      tgt.style.transformOrigin = `${(mx - tr.left) / local}px ${(my - tr.top) / local}px`;
+      tgt.style.willChange = 'transform';
+      pinch = { d0: dist(a, b) || 1, z0: z.get(), k: 1, fx: mx - sr.left, fy: my - sr.top, sc, tgt, z };
+    }, { passive: false, capture: true });
+    ws.addEventListener('touchmove', e => {
+      if (!pinch || e.touches.length < 2) return;
+      e.preventDefault();
+      const p = pinch, raw = p.z0 * dist(e.touches[0], e.touches[1]) / p.d0;
+      const nz = Math.max(p.z.min, Math.min(p.z.max, raw));
+      p.k = nz / p.z0;
+      p.tgt.style.transform = `scale(${p.k})`;
+    }, { passive: false, capture: true });
+    const finish = e => {
+      if (!pinch || (e.touches && e.touches.length >= 2)) return;
+      const p = pinch;
+      pinch = null;
+      p.tgt.style.transform = '';
+      p.tgt.style.transformOrigin = '';
+      p.tgt.style.willChange = '';
+      suppressClickUntil = Date.now() + 450;     // el dedo que queda no debe contar como toque
+      if (Math.abs(p.k - 1) > 0.02) zoomAround(p.z, p.z0 * p.k, p.sc, p.fx, p.fy);
+    };
+    ws.addEventListener('touchend', finish, { capture: true });
+    ws.addEventListener('touchcancel', finish, { capture: true });
+    ws.addEventListener('click', e => { if (Date.now() < suppressClickUntil) { e.stopPropagation(); e.preventDefault(); } }, { capture: true });
+    ws.addEventListener('pointerdown', e => { if (pinch || Date.now() < suppressClickUntil) e.stopPropagation(); }, { capture: true });
+    // Ctrl + rueda / pellizco en el trackpad
+    ws.addEventListener('wheel', e => {
+      const z = Z();
+      if (!z || !e.ctrlKey) return;
+      e.preventDefault();
+      wheelAcc *= Math.exp(-e.deltaY * 0.01);
+      const sc = z.scroller ? z.scroller() : ws, sr = sc.getBoundingClientRect();
+      wheelAt = { sc, fx: e.clientX - sr.left, fy: e.clientY - sr.top };
+      if (wheelRaf) return;
+      wheelRaf = requestAnimationFrame(() => {
+        wheelRaf = 0;
+        const zz = Z(); if (!zz) return;
+        const nz = Math.max(zz.min, Math.min(zz.max, zz.get() * wheelAcc));
+        wheelAcc = 1;
+        zoomAround(zz, nz, wheelAt.sc, wheelAt.fx, wheelAt.fy);
+      });
+    }, { passive: false });
+  })();
+
   /* ----- Imprimir / exportar a PDF ----- */
   async function printDoc(asPdf) {
     if (!editor) return;

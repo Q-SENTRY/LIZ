@@ -103,7 +103,29 @@ const UI = (() => {
     });
   }
 
+  /** Envía un archivo a la app Android en partes de 512 KB (evita un texto gigante en memoria) */
+  async function sendToAndroid(blob, name) {
+    const A = window.FolioAndroid;
+    if (!A.beginFile) return null;
+    const id = A.beginFile(name, blob.type || 'application/octet-stream');
+    if (!id) return null;
+    const CH = 512 * 1024;
+    for (let off = 0; off < blob.size; off += CH) {
+      if (!A.appendFile(id, await blobToBase64(blob.slice(off, off + CH)))) throw new Error('No se pudo escribir el archivo');
+    }
+    return id;
+  }
+
   async function download(blob, name) {
+    if (android && window.FolioAndroid.beginFile) {
+      const id = await sendToAndroid(blob, name);
+      if (id) {
+        const r = window.FolioAndroid.finishSave(id);
+        if (r === 'saved') toast('Guardado en Descargas › Folio: ' + name, 3500);
+        else if (r === 'error') toast('No se pudo guardar');
+        return;
+      }
+    }
     if (android) {
       const saved = window.FolioAndroid.saveFile(name, blob.type || 'application/octet-stream', await blobToBase64(blob));
       if (saved) toast('Guardado en Descargas › Folio: ' + name, 3500);
@@ -118,6 +140,7 @@ const UI = (() => {
   }
 
   async function share(blob, name) {
+    if (android && window.FolioAndroid.beginFile) { const id = await sendToAndroid(blob, name); if (id) { window.FolioAndroid.finishShare(id); return true; } }
     if (android) { window.FolioAndroid.shareFile(name, blob.type || 'application/octet-stream', await blobToBase64(blob)); return true; }
     const file = new File([blob], name, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {

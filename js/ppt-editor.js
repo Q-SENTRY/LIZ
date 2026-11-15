@@ -682,11 +682,13 @@ const PptEditor = (() => {
     }
 
     /* ---------- Escalado y navegación ---------- */
+    let zoom = 1;
+    function setZoom(z) { zoom = Math.max(0.5, Math.min(4, z)); fit(); }
     function fit() {
       const avail = Math.max(200, ctx.workspace.clientWidth - 20);
       // la diapositiva completa debe caber en pantalla (importante en celular horizontal)
       const availH = Math.max(160, ctx.workspace.clientHeight - 70);
-      const w = Math.min(avail, 1100, availH * slideW / slideH);
+      const w = Math.min(avail, 1100, availH * slideW / slideH) * zoom;
       const s = w / DESIGN_W;
       for (const sl of slides) {
         const h = sl.dom;
@@ -1101,7 +1103,8 @@ const PptEditor = (() => {
       return { node: root, page: `@page { size: ${wIn}in ${hIn}in; margin: 0; }` };
     }
 
-    const api = { open, save, destroy, ext: 'pptx', kind: 'ppt', pages: pagesApi, printable };
+    const api = { open, save, destroy, ext: 'pptx', kind: 'ppt', pages: pagesApi, printable,
+      zoom: { get: () => zoom, set: z => setZoom(z), min: 0.5, max: 4, target: () => list } };
     return api;
   }
   return { create };

@@ -26,7 +26,8 @@ const PdfEditor = (() => {
 
   function create(ctx) {
     let sources = [], pages = [], zoom = 1, tool = 'view', shape = 'rect', color = '#d93025', widthLevel = 2, baseWidth = 0;
-    let observer, container, sel = null;   // sel = { p, a }
+    let observer, releaser, container, sel = null;   // sel = { p, a }
+    let replacedChars = 0, abortDrag = null;
     let docName = 'documento';
     let undoStack = [], redoStack = [];
 
@@ -174,7 +175,7 @@ const PdfEditor = (() => {
         p.svg.setAttribute('viewBox', `0 0 ${p.vp.width} ${p.vp.height}`);
         drawOverlay(p);
       }
-      for (const p of pages) { observer.unobserve(p.wrap); observer.observe(p.wrap); }
+      for (const p of pages) { observer.unobserve(p.wrap); observer.observe(p.wrap); releaser.unobserve(p.wrap); releaser.observe(p.wrap); }
     }
     async function renderPage(p) {
       if (p.rendered || p.rendering) return;
@@ -489,7 +490,13 @@ const PdfEditor = (() => {
       }, { passive: false });
 
       p.svg.addEventListener('pointerdown', e => {
-        if (tool === 'view' || e.button > 0) return;
+        if (tool === 'view' || e.button > 0 || !e.isPrimary) return;
+        abortDrag = () => {   // al empezar un pellizco con dos dedos se cancela el trazo en curso
+          if (!drag) return;
+          if ((drag.mode === 'draw' || drag.mode === 'shape') && drag.a) p.anns.splice(p.anns.indexOf(drag.a), 1);
+          drag = null;
+          drawOverlay(p);
+        };
         const [vx, vy] = pos(e);
         if (tool === 'pen' || tool === 'hl') {
           e.preventDefault();
@@ -639,7 +646,7 @@ const PdfEditor = (() => {
 
     function makePage(page, srcId, srcIndex) {
       const p = { page, src: srcId, srcIndex, extraRot: 0, anns: [] };
-      p.canvas = el('canvas');
+      p.canvas = el('canvas', { width: 0, height: 0 });   // sin memoria hasta que se dibuja
       p.svg = document.createElementNS(SVGNS, 'svg');
       p.svg.style.pointerEvents = tool === 'view' ? 'none' : 'auto';
       p.wrap = el('div', { class: 'pdf-page' }, p.canvas, p.svg);
@@ -718,6 +725,13 @@ const PdfEditor = (() => {
       observer = new IntersectionObserver(entries => {
         for (const en of entries) if (en.isIntersecting) renderPage(en.target._p);
       }, { root: ctx.workspace, rootMargin: '600px 0px' });
+      // páginas muy lejos de la pantalla liberan su imagen (evita quedarse sin memoria en PDF largos)
+      releaser = new IntersectionObserver(entries => {
+        for (const en of entries) {
+          const p = en.target._p;
+          if (!en.isIntersecting && p.rendered && !p.rendering) { p.canvas.width = 0; p.canvas.height = 0; p.rendered = false; }
+        }
+      }, { root: ctx.workspace, rootMargin: '3000px 0px' });
       pages = await loadSource(data, name);
       baseWidth = pages[0].page.getViewport({ scale: 1 }).width;
       rebuildDom();
@@ -736,7 +750,7 @@ const PdfEditor = (() => {
      */
     async function drawAnnotations(doc, pg, p, T, fonts, imgCache) {
       const { rgb, degrees, LineCapStyle } = PDFLib;
-      const safe = (font, str) => [...str].map(ch => { try { font.encodeText(ch); return ch; } catch { return '?'; } }).join('');
+      const safe = (font, str) => [...str].map(ch => { try { font.encodeText(ch); return ch; } catch { replacedChars++; return '?'; } }).join('');
       for (const a of p.anns) {
         const col = a.color ? rgb(...hexToRgb(a.color)) : rgb(0, 0, 0);
         if (a.type === 'ink') {
@@ -788,6 +802,12 @@ const PdfEditor = (() => {
      * si se quitaron, movieron o unieron páginas se arma un PDF nuevo copiando solo lo necesario (archivo más liviano).
      */
     async function save(list) {
+      replacedChars = 0;
+      const blob = await saveInner(list);
+      if (replacedChars) setTimeout(() => toast('Algunos caracteres (emojis o letras de otros alfabetos) no existen en la fuente del PDF y se guardaron como «?».', 5000), 600);
+      return blob;
+    }
+    async function saveInner(list) {
       const { PDFDocument, StandardFonts, degrees } = PDFLib;
       list = list || pages;
       if (!list.length) throw new Error('No hay páginas para guardar.');
@@ -856,6 +876,7 @@ const PdfEditor = (() => {
 
     function destroy() {
       observer && observer.disconnect();
+      releaser && releaser.disconnect();
       window.removeEventListener('resize', api._onResize);
       document.removeEventListener('keydown', onKey);
       sources.forEach(sr => sr.pdf && sr.pdf.destroy());
@@ -1021,7 +1042,9 @@ const PdfEditor = (() => {
         const wIn = +(vp1.width / 72).toFixed(3), hIn = +(vp1.height / 72).toFixed(3);
         const key = wIn + 'x' + hIn;
         if (!sizes.has(key)) { const name = 'pdfp' + sizes.size; sizes.set(key, name); css += `@page ${name} { size: ${wIn}in ${hIn}in; margin: 0; }`; }
-        const k = Math.min(2.5, Math.sqrt(14e6 / (vp1.width * vp1.height)));
+        // resolución según la cantidad de páginas (muchas páginas = menos memoria por página)
+        const budget = pages.length > 60 ? 3e6 : pages.length > 20 ? 6e6 : 14e6;
+        const k = Math.min(2.5, Math.sqrt(budget / (vp1.width * vp1.height)));
         const vp = p.page.getViewport({ scale: k, rotation: rot });
         const c = el('canvas', { width: Math.ceil(vp.width), height: Math.ceil(vp.height) });
         const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
@@ -1033,7 +1056,9 @@ const PdfEditor = (() => {
       return { node: root, page: css + '@page { margin: 0; }' };
     }
 
-    const api = { open, save: () => save(), destroy, ext: 'pdf', kind: 'pdf', pages: pagesApi, printable, undo, redo, organizer, appendPdf, setSourceLabel: (i, l) => { if (sources[i]) sources[i].label = l; } };
+    const api = {
+      zoom: { get: () => zoom, set: z => setZoom(z), min: 0.4, max: 5, target: () => container, cancel: () => { if (abortDrag) abortDrag(); } },
+      open, save: () => save(), destroy, ext: 'pdf', kind: 'pdf', pages: pagesApi, printable, undo, redo, organizer, appendPdf, setSourceLabel: (i, l) => { if (sources[i]) sources[i].label = l; } };
     return api;
   }
   return { create };

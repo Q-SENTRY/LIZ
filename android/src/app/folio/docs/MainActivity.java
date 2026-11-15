@@ -59,6 +59,7 @@ public class MainActivity extends Activity {
     private boolean pageReady = false;
     private Uri pendingOpen;
     private byte[] pendingSave;
+    private File pendingSaveFile;
     private final Map<String, byte[]> incoming = new HashMap<>();
     private final Map<String, String> incomingMime = new HashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -164,6 +165,14 @@ public class MainActivity extends Activity {
             if (ext != null) name += "." + ext;
         }
         return name;
+    }
+
+    static void copy(InputStream in, OutputStream out) throws IOException {
+        try (InputStream is = in) {
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = is.read(buf)) > 0) out.write(buf, 0, n);
+        }
     }
 
     static byte[] readAll(InputStream in) throws IOException {
@@ -286,15 +295,18 @@ public class MainActivity extends Activity {
         }
         if (req == REQ_SAVE) {
             byte[] bytes = pendingSave;
+            File file = pendingSaveFile;
             pendingSave = null;
-            if (res == RESULT_OK && data != null && data.getData() != null && bytes != null) {
+            pendingSaveFile = null;
+            if (res == RESULT_OK && data != null && data.getData() != null && (bytes != null || file != null)) {
                 try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
-                    out.write(bytes);
+                    if (file != null) copy(new java.io.FileInputStream(file), out); else out.write(bytes);
                     toast("Archivo guardado");
                 } catch (Exception e) {
                     toast("No se pudo guardar");
                 }
             }
+            if (file != null) file.delete();
             return;
         }
         super.onActivityResult(req, res, data);
@@ -376,7 +388,97 @@ public class MainActivity extends Activity {
             } });
         }
 
+        /* ----- Transferencia por partes (archivos grandes sin agotar la memoria) ----- */
+        private final Map<String, File> parts = new HashMap<>();
+        private final Map<String, String[]> partMeta = new HashMap<>();
+
         @JavascriptInterface
-        public String version() { return "2"; }
+        public String beginFile(String name, String mime) {
+            try {
+                File dir = new File(getCacheDir(), "out");
+                dir.mkdirs();
+                String id = "p" + System.nanoTime();
+                File f = new File(dir, id);
+                new FileOutputStream(f).close();
+                parts.put(id, f);
+                partMeta.put(id, new String[]{name, mime});
+                return id;
+            } catch (Exception e) { return ""; }
+        }
+
+        @JavascriptInterface
+        public boolean appendFile(String id, String base64) {
+            File f = parts.get(id);
+            if (f == null) return false;
+            try (FileOutputStream out = new FileOutputStream(f, true)) {
+                out.write(Base64.decode(base64, Base64.DEFAULT));
+                return true;
+            } catch (Exception e) { return false; }
+        }
+
+        /** Guarda el archivo armado por partes. Devuelve "saved", "asking" (pregunta dónde guardar) o "error". */
+        @JavascriptInterface
+        public String finishSave(String id) {
+            final File f = parts.remove(id);
+            final String[] meta = partMeta.remove(id);
+            if (f == null || meta == null) return "error";
+            if (Build.VERSION.SDK_INT >= 29) {
+                try {
+                    ContentResolver cr = getContentResolver();
+                    ContentValues v = new ContentValues();
+                    v.put("_display_name", meta[0]);
+                    v.put("mime_type", meta[1]);
+                    v.put("relative_path", Environment.DIRECTORY_DOWNLOADS + "/Folio");
+                    v.put("is_pending", 1);
+                    Uri item = cr.insert(Uri.parse("content://media/external/downloads"), v);
+                    if (item == null) throw new IOException("sin acceso");
+                    try (OutputStream out = cr.openOutputStream(item)) { copy(new java.io.FileInputStream(f), out); }
+                    ContentValues done = new ContentValues();
+                    done.put("is_pending", 0);
+                    cr.update(item, done, null, null);
+                    f.delete();
+                    return "saved";
+                } catch (Exception e) {
+                    // si falla, se pregunta dónde guardar
+                }
+            }
+            pendingSaveFile = f;
+            main.post(new Runnable() { public void run() {
+                Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType(meta[1]);
+                i.putExtra(Intent.EXTRA_TITLE, meta[0]);
+                try { startActivityForResult(i, REQ_SAVE); } catch (ActivityNotFoundException e) { toast("No se pudo guardar"); }
+            } });
+            return "asking";
+        }
+
+        @JavascriptInterface
+        public void finishShare(String id) {
+            File f = parts.remove(id);
+            String[] meta = partMeta.remove(id);
+            if (f == null || meta == null) { toast("No se pudo compartir"); return; }
+            try {
+                File dir = new File(getCacheDir(), "share");
+                dir.mkdirs();
+                File[] old = dir.listFiles();
+                if (old != null) for (File o : old) o.delete();
+                File target = new File(dir, meta[0].replaceAll("[\\\\/:*?\"<>|]", "_"));
+                if (!f.renameTo(target)) { copy(new java.io.FileInputStream(f), new FileOutputStream(target)); f.delete(); }
+                Uri uri = Uri.parse("content://app.folio.docs.share/" + Uri.encode(target.getName()) + "?type=" + Uri.encode(meta[1]));
+                final Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType(meta[1]);
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.setClipData(ClipData.newRawUri(meta[0], uri));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                final String title = "Compartir " + meta[0];
+                main.post(new Runnable() { public void run() { startActivity(Intent.createChooser(send, title)); } });
+            } catch (Exception e) {
+                toast("No se pudo compartir");
+            }
+        }
+
+        @JavascriptInterface
+        public String version() { return "3"; }
     }
 }

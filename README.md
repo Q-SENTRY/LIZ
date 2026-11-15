@@ -90,6 +90,12 @@ python3 -m http.server 8000
 - Al quitar o reordenar páginas se crea un PDF nuevo que copia solo lo necesario, así el archivo pesa menos.
   Si no cambias páginas, se conserva el PDF original (marcadores, formularios y metadatos).
 
+## Zoom
+
+- **Pellizca con dos dedos** para acercar o alejar en PDF, presentaciones, documentos y hojas de cálculo. En documentos
+  el texto se agranda y se reacomoda al ancho de la pantalla (sin desplazamiento horizontal).
+- En computadora: **Ctrl + rueda** del ratón o pellizco en el trackpad. También están los botones − / + en la barra.
+
 ## Navegar, imprimir y exportar a PDF
 
 - Indicador **«página X de N»** abajo en PDF, presentaciones y documentos (en documentos es aproximado, como hoja Carta).
