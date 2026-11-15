@@ -1,4 +1,4 @@
-# LIZ Docs
+# Folio
 
 Una app para el celular para **leer y editar PDF, Excel, Word y PowerPoint**.
 Es una PWA (app web instalable): funciona en Android y iPhone, se instala desde el navegador
@@ -23,7 +23,7 @@ También puedes **crear** documentos, hojas de cálculo y presentaciones nuevas,
 2. Abre la dirección en el celular:
    - **Android (Chrome):** menú ⋮ → *Instalar app* (o *Agregar a la pantalla principal*).
    - **iPhone (Safari):** botón Compartir → *Agregar a inicio*.
-3. Listo: aparece el ícono de **LIZ Docs** y funciona sin internet.
+3. Listo: aparece el ícono de **Folio** y funciona sin internet.
 
 Para probarla en la computadora:
 

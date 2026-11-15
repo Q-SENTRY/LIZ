@@ -264,7 +264,7 @@ const WordEditor = (() => {
 
     const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
     const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
-      `<dc:creator>LIZ Docs</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
+      `<dc:creator>Folio</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
 
     const zip = new JSZip();
     zip.file('[Content_Types].xml', types);
@@ -312,30 +312,30 @@ const WordEditor = (() => {
       });
       // evita que los botones roben la selección del documento
       const b = (label, title, fn, state) => {
-        const btn = el('button', { class: 'tb', title, 'data-state': state, onmousedown: e => e.preventDefault(), onclick: fn }, label);
+        const btn = el('button', { class: 'tb', title, 'aria-label': title, 'data-state': state, onmousedown: e => e.preventDefault(), onclick: fn }, typeof label === 'string' ? UI.icon(label) : label);
         btn.addEventListener('touchstart', () => saveSel(), { passive: true });
         return btn;
       };
       tb.append(
-        b('↶', 'Deshacer', () => cmd('undo')), b('↷', 'Rehacer', () => cmd('redo')),
+        b('undo', 'Deshacer', () => cmd('undo')), b('redo', 'Rehacer', () => cmd('redo')),
         el('span', { class: 'tb-sep' }), block,
-        b(el('b', {}, 'B'), 'Negrita', () => cmd('bold'), 'bold'),
-        b(el('i', {}, 'I'), 'Cursiva', () => cmd('italic'), 'italic'),
-        b(el('u', {}, 'U'), 'Subrayado', () => cmd('underline'), 'underline'),
-        b(el('s', {}, 'S'), 'Tachado', () => cmd('strikeThrough'), 'strikeThrough'),
+        b(el('b', { class: 'glyph' }, 'B'), 'Negrita', () => cmd('bold'), 'bold'),
+        b(el('i', { class: 'glyph' }, 'I'), 'Cursiva', () => cmd('italic'), 'italic'),
+        b(el('u', { class: 'glyph' }, 'U'), 'Subrayado', () => cmd('underline'), 'underline'),
+        b(el('s', { class: 'glyph' }, 'S'), 'Tachado', () => cmd('strikeThrough'), 'strikeThrough'),
         size, color,
-        b('🖍', 'Resaltar', () => cmd('hiliteColor', '#ffff00')),
+        b('marker', 'Resaltar', () => cmd('hiliteColor', '#ffff00')),
         el('span', { class: 'tb-sep' }),
-        b('• Lista', 'Viñetas', () => cmd('insertUnorderedList'), 'insertUnorderedList'),
-        b('1. Lista', 'Numeración', () => cmd('insertOrderedList'), 'insertOrderedList'),
-        b('⇤', 'Alinear a la izquierda', () => cmd('justifyLeft'), 'justifyLeft'),
-        b('↔', 'Centrar', () => cmd('justifyCenter'), 'justifyCenter'),
-        b('⇥', 'Alinear a la derecha', () => cmd('justifyRight'), 'justifyRight'),
+        b('list', 'Viñetas', () => cmd('insertUnorderedList'), 'insertUnorderedList'),
+        b('listOl', 'Numeración', () => cmd('insertOrderedList'), 'insertOrderedList'),
+        b('alignL', 'Alinear a la izquierda', () => cmd('justifyLeft'), 'justifyLeft'),
+        b('alignC', 'Centrar', () => cmd('justifyCenter'), 'justifyCenter'),
+        b('alignR', 'Alinear a la derecha', () => cmd('justifyRight'), 'justifyRight'),
         el('span', { class: 'tb-sep' }),
-        b('🖼 Imagen', 'Insertar imagen', () => imgIn.click()),
-        b('▦ Tabla', 'Insertar tabla', insertTable),
-        b('🔗', 'Enlace', insertLink),
-        b('⌧', 'Quitar formato', () => cmd('removeFormat')),
+        b('image', 'Insertar imagen', () => imgIn.click()),
+        b('table', 'Insertar tabla', insertTable),
+        b('link', 'Enlace', insertLink),
+        b('unformat', 'Quitar formato', () => cmd('removeFormat')),
         imgIn
       );
     }

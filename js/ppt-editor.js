@@ -589,7 +589,7 @@ const PptEditor = (() => {
       for (let i = 0; i < slides.length; i++) {
         const s = slides[i];
         s.dom = await renderSlide(s, i);
-        list.append(s.dom, el('div', { class: 'ppt-num' }, `Diapositiva ${i + 1} de ${slides.length}`));
+        list.append(s.dom, el('div', { class: 'ppt-num' }, `${i + 1} / ${slides.length}`));
       }
       fit();
       setCurrent(Math.min(current, slides.length - 1));
@@ -599,17 +599,18 @@ const PptEditor = (() => {
     function buildToolbar() {
       const tb = ctx.toolbar;
       tb.innerHTML = '';
-      const fmt = (label, title, c) => el('button', { class: 'tb', title, onmousedown: e => e.preventDefault(), onclick: () => { document.execCommand(c); ctx.dirty(); } }, label);
+      const fmt = (label, title, c) => el('button', { class: 'tb', title, 'aria-label': title, onmousedown: e => e.preventDefault(), onclick: () => { document.execCommand(c); ctx.dirty(); } }, label);
       tb.append(
-        el('button', { class: 'tb', onclick: addTextBox }, '＋ Texto'),
-        el('button', { class: 'tb', 'data-move': 1, onclick: () => setMoveMode(!moveMode) }, '✥ Mover'),
-        el('button', { class: 'tb', onclick: deleteBox }, '🗑 Cuadro'),
+        UI.tbBtn('play', 'Presentar', present, { label: 'Presentar' }),
         el('span', { class: 'tb-sep' }),
-        fmt(el('b', {}, 'B'), 'Negrita', 'bold'), fmt(el('i', {}, 'I'), 'Cursiva', 'italic'), fmt(el('u', {}, 'U'), 'Subrayado', 'underline'),
+        UI.tbBtn('textbox', 'Agregar cuadro de texto', addTextBox, { label: 'Texto' }),
+        UI.tbBtn('move', 'Mover cuadros', () => setMoveMode(!moveMode), { label: 'Mover', attrs: { 'data-move': 1 } }),
+        UI.tbBtn('trash', 'Eliminar cuadro seleccionado', deleteBox),
         el('span', { class: 'tb-sep' }),
-        el('button', { class: 'tb', onclick: duplicateSlide }, '⧉ Duplicar diapositiva'),
-        el('button', { class: 'tb', onclick: deleteSlide }, '🗑 Diapositiva'),
-        el('button', { class: 'tb', onclick: present }, '▶ Presentar')
+        fmt(el('b', { class: 'glyph' }, 'B'), 'Negrita', 'bold'), fmt(el('i', { class: 'glyph' }, 'I'), 'Cursiva', 'italic'), fmt(el('u', { class: 'glyph' }, 'U'), 'Subrayado', 'underline'),
+        el('span', { class: 'tb-sep' }),
+        UI.tbBtn('copy', 'Duplicar diapositiva', duplicateSlide, { label: 'Duplicar' }),
+        UI.tbBtn('trash', 'Eliminar diapositiva', deleteSlide, { label: 'Diapositiva' })
       );
     }
 

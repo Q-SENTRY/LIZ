@@ -3,12 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#2b59c3">
-<meta name="description" content="Lee y edita PDF, Excel, Word y PowerPoint desde tu celular, sin conexión.">
+<meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Folio: lee y edita PDF, Excel, Word y PowerPoint desde tu celular, sin conexión.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="LIZ Docs">
-<title>LIZ Docs</title>
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Folio">
+<title>Folio</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -18,42 +20,44 @@
 
 <!-- ========== INICIO ========== -->
 <section id="home" class="view active">
-  <header class="home-head">
-    <img src="icons/icon.svg" alt="" class="logo">
-    <div>
-      <h1>LIZ Docs</h1>
-      <p>Lee y edita tus documentos en el celular</p>
+  <div class="home-inner">
+    <header class="home-head">
+      <span class="wordmark">Folio</span>
+      <span class="edition">Documentos</span>
+    </header>
+
+    <h1 class="hero">Tus documentos,<br><em>en orden.</em></h1>
+
+    <button id="btnOpen" class="open-big">
+      <span class="open-ic" data-icon="open"></span>
+      <span class="open-txt"><b>Abrir documento</b><small>PDF, Excel, Word o PowerPoint</small></span>
+      <span class="open-arrow" data-icon="chevron"></span>
+    </button>
+    <input type="file" id="fileInput" hidden
+      accept=".pdf,.xlsx,.xls,.xlsm,.csv,.ods,.docx,.txt,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+
+    <h2 class="sec-title">Crear</h2>
+    <div class="new-grid">
+      <button class="new-card" data-new="word"><span class="tag t-doc">DOC</span><span class="new-name">Documento</span></button>
+      <button class="new-card" data-new="excel"><span class="tag t-xls">XLS</span><span class="new-name">Hoja de cálculo</span></button>
+      <button class="new-card" data-new="ppt"><span class="tag t-ppt">PPT</span><span class="new-name">Presentación</span></button>
     </div>
-  </header>
 
-  <button id="btnOpen" class="open-big">
-    <span class="ico">📂</span>
-    <span><b>Abrir archivo</b><small>PDF · Excel · Word · PowerPoint</small></span>
-  </button>
-  <input type="file" id="fileInput" hidden
-    accept=".pdf,.xlsx,.xls,.xlsm,.csv,.ods,.docx,.txt,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+    <h2 class="sec-title">Recientes</h2>
+    <ul id="recentList" class="recent"></ul>
+    <p id="recentEmpty" class="empty">Aún no has abierto documentos.</p>
 
-  <h2 class="sec-title">Crear nuevo</h2>
-  <div class="new-grid">
-    <button class="new-card" data-new="word"><span class="badge b-word">W</span>Documento</button>
-    <button class="new-card" data-new="excel"><span class="badge b-excel">X</span>Hoja de cálculo</button>
-    <button class="new-card" data-new="ppt"><span class="badge b-ppt">P</span>Presentación</button>
+    <p class="foot"><span data-icon="lock"></span>Todo se procesa en tu dispositivo. Nada se sube a internet.</p>
   </div>
-
-  <h2 class="sec-title">Recientes</h2>
-  <ul id="recentList" class="recent"></ul>
-  <p id="recentEmpty" class="muted">Los archivos que abras aparecerán aquí.</p>
-
-  <p class="foot muted">Tus archivos se procesan solo en tu dispositivo. Nada se sube a internet.</p>
 </section>
 
 <!-- ========== EDITOR ========== -->
 <section id="editor" class="view">
   <header class="topbar">
-    <button id="btnBack" class="icon-btn" aria-label="Volver">←</button>
-    <span id="docBadge" class="badge"></span>
+    <button id="btnBack" class="icon-btn" aria-label="Volver" data-icon="back"></button>
+    <span id="docBadge" class="tag"></span>
     <input id="docName" class="doc-name" spellcheck="false" aria-label="Nombre del archivo">
-    <button id="btnShare" class="icon-btn" aria-label="Compartir" title="Compartir">⤴</button>
+    <button id="btnShare" class="icon-btn" aria-label="Compartir" title="Compartir" data-icon="share"></button>
     <button id="btnSave" class="save-btn">Guardar</button>
   </header>
   <div id="toolbar" class="toolbar"></div>
@@ -62,7 +66,8 @@
 
 <!-- ========== MODAL / TOAST ========== -->
 <div id="modal" class="modal" hidden>
-  <div class="modal-card">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <span class="grabber"></span>
     <h3 id="modalTitle"></h3>
     <div id="modalBody"></div>
     <div class="modal-actions" id="modalActions"></div>

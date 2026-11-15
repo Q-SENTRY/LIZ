@@ -81,7 +81,8 @@ const UI = (() => {
     const list = el('div', { class: 'choice-list' });
     return new Promise(resolve => {
       for (const o of options) {
-        list.append(el('button', { class: 'btn', onclick: () => { $('#modal').hidden = true; resolve(o.value); } }, o.label));
+        list.append(el('button', { class: 'choice', onclick: () => { $('#modal').hidden = true; resolve(o.value); } },
+          o.icon ? icon(o.icon, 18) : null, el('span', {}, o.label), icon('chevron', 16)));
       }
       modal(title, list, [{ label: 'Cancelar', value: null }]).then(v => resolve(v));
     });
@@ -120,7 +121,7 @@ const UI = (() => {
   }
 
   /* ---------- Recientes (IndexedDB, opcional) ---------- */
-  const DB_NAME = 'liz-docs', STORE = 'recent', MAX_RECENT = 10, MAX_BYTES = 30 * 1024 * 1024;
+  const DB_NAME = 'folio-docs', STORE = 'recent', MAX_RECENT = 10, MAX_BYTES = 30 * 1024 * 1024;
   function db() {
     return new Promise((res, rej) => {
       try {
@@ -158,5 +159,63 @@ const UI = (() => {
     async remove(name) { try { await tx('readwrite', s => s.delete(name)); } catch {} }
   };
 
-  return { $, el, toast, loading, modal, prompt, confirm, choose, download, share, xmlEsc, readFile, recent };
+
+  /* ---------- Íconos de línea (SVG, 24×24) ---------- */
+  const P = d => d.split(' M').map((x, i) => `<path d="${i ? 'M' + x : x}"/>`).join('');
+  const ICONS = {
+    back: P('M15 18l-6-6 6-6'),
+    chevron: P('M9 18l6-6-6-6'),
+    share: P('M12 3v12 M8 7l4-4 4 4 M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7'),
+    open: P('M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z'),
+    plus: P('M12 5v14 M5 12h14'),
+    minus: P('M5 12h14'),
+    x: P('M6 6l12 12 M18 6L6 18'),
+    lock: P('M6.5 11h11v9h-11z M8.5 11V8a3.5 3.5 0 0 1 7 0v3'),
+    pointer: P('M5 3.5l13 6.5-5.5 1.8L10.5 17.5z'),
+    type: P('M5 7V5h14v2 M12 5v14 M9 19h6'),
+    pen: P('M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z'),
+    marker: P('M4 16l8.5-8.5 4 4L8 20H4z M14.5 5.5l2-2 4 4-2 2 M13 20h7'),
+    eraser: P('M7 20h12 M4.6 13.4l7.8-7.8a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L11 19H8.2l-3.6-3.6a1.4 1.4 0 0 1 0-2z'),
+    undo: P('M9 14L4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11'),
+    redo: P('M15 14l5-5-5-5 M20 9H9.5a5.5 5.5 0 0 0 0 11H13'),
+    fit: P('M3 12h18 M7 8l-4 4 4 4 M17 8l4 4-4 4'),
+    rotate: P('M20 12a8 8 0 1 1-2.6-5.9L20 8.5 M20 3.5v5h-5'),
+    restore: P('M4 12a8 8 0 1 0 2.6-5.9L4 8.5 M4 3.5v5h5'),
+    trash: P('M4 7h16 M10 11v6 M14 11v6 M6 7l1 13h10l1-13 M9 7V4h6v3'),
+    rows: P('M3 5h18 M3 10h18 M3 15h9 M18 13v7 M14.5 16.5h7'),
+    cols: P('M5 3v18 M10 3v18 M15 3v9 M18 14.5v7 M14.5 18h7'),
+    clear: P('M21 5H9l-6 7 6 7h12z M12.5 9l6 6 M18.5 9l-6 6'),
+    sigma: P('M18 7V4H6l6 8-6 8h12v-3'),
+    textDown: P('M3 18l5-12 5 12 M5 14h6 M15.5 12h5.5'),
+    textUp: P('M3 18l5-12 5 12 M5 14h6 M18.25 9.25v5.5 M15.5 12h5.5'),
+    list: P('M9 6h11 M9 12h11 M9 18h11 M4.5 6h.01 M4.5 12h.01 M4.5 18h.01'),
+    listOl: P('M10 6h10 M10 12h10 M10 18h10 M4 4.5h1.2v4 M3.6 14.2a1.3 1.3 0 0 1 2.4.7c0 .9-2.5 2.4-2.5 3.1H6'),
+    alignL: P('M4 6h16 M4 10h10 M4 14h16 M4 18h10'),
+    alignC: P('M4 6h16 M7 10h10 M4 14h16 M7 18h10'),
+    alignR: P('M4 6h16 M10 10h10 M4 14h16 M10 18h10'),
+    image: P('M4 5h16v14H4z M4 16l5-5 4 4 2-2 5 5 M15.5 9h.01'),
+    table: P('M3.5 5h17v14h-17z M3.5 10h17 M3.5 14.5h17 M9.5 5v14 M14.5 5v14'),
+    link: P('M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'),
+    unformat: P('M4 7V5h12v2 M10 5l-3 14 M14.5 14.5l5 5 M19.5 14.5l-5 5'),
+    move: P('M12 3v18 M3 12h18 M9 6l3-3 3 3 M9 18l3 3 3-3 M6 9l-3 3 3 3 M18 9l3 3-3 3'),
+    copy: P('M8.5 8.5h11v11h-11z M15.5 8.5v-4h-11v11h4'),
+    play: P('M7.5 5l11 7-11 7z'),
+    check: P('M5 12.5l4.5 4.5L19 7.5'),
+    more: '<circle cx="5.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
+    textbox: P('M4 4h16v16H4z M8.5 9h7 M12 9v7'),
+    file: P('M13.5 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8.5z M13.5 3v5.5H19'),
+    download: P('M12 4v11 M7.5 10.5L12 15l4.5-4.5 M5 19h14')
+  };
+  function icon(name, size = 20) {
+    const span = document.createElement('span');
+    span.className = 'ic';
+    span.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+    return span;
+  }
+  /** Botón de barra de herramientas: ícono + etiqueta opcional */
+  function tbBtn(iconName, title, onclick, { label = '', attrs = {} } = {}) {
+    return el('button', { class: 'tb' + (label ? ' tb-l' : ''), title, 'aria-label': title, onclick, ...attrs }, icon(iconName), label ? el('span', {}, label) : null);
+  }
+
+  return { icon, tbBtn, $, el, toast, loading, modal, prompt, confirm, choose, download, share, xmlEsc, readFile, recent };
 })();

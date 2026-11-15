@@ -3,10 +3,10 @@
   const { $, el, toast, loading, confirm, choose, download, share, readFile, recent } = UI;
 
   const KINDS = {
-    pdf: { exts: ['pdf'], factory: PdfEditor, badge: 'PDF', cls: 'b-pdf' },
-    excel: { exts: ['xlsx', 'xls', 'xlsm', 'csv', 'ods'], factory: ExcelEditor, badge: 'X', cls: 'b-excel' },
-    word: { exts: ['docx', 'txt'], factory: WordEditor, badge: 'W', cls: 'b-word' },
-    ppt: { exts: ['pptx'], factory: PptEditor, badge: 'P', cls: 'b-ppt' }
+    pdf: { exts: ['pdf'], factory: PdfEditor, badge: 'PDF', cls: 't-pdf' },
+    excel: { exts: ['xlsx', 'xls', 'xlsm', 'csv', 'ods'], factory: ExcelEditor, badge: 'XLS', cls: 't-xls' },
+    word: { exts: ['docx', 'txt'], factory: WordEditor, badge: 'DOC', cls: 't-doc' },
+    ppt: { exts: ['pptx'], factory: PptEditor, badge: 'PPT', cls: 't-ppt' }
   };
   const UNSUPPORTED = {
     doc: 'Los archivos .doc antiguos no son compatibles. Ábrelo en Word y guárdalo como .docx.',
@@ -36,7 +36,7 @@
     $('#toolbar').innerHTML = '';
     $('#workspace').scrollTo(0, 0);
     const badge = $('#docBadge');
-    badge.className = 'badge ' + k.cls;
+    badge.className = 'tag ' + k.cls;
     badge.textContent = k.badge;
     baseName = name.replace(/\.[^.]+$/, '');
     $('#docName').value = baseName;
@@ -125,6 +125,13 @@
 
   /* ----- Recientes ----- */
   const fmtSize = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+  function fmtDate(t) {
+    const d = new Date(t), now = new Date();
+    if (d.toDateString() === now.toDateString()) return 'Hoy, ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const y = new Date(now); y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'Ayer';
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+  }
   async function renderRecent() {
     const items = await recent.list();
     const ul = $('#recentList');
@@ -135,9 +142,9 @@
       if (!kind) continue;
       const k = KINDS[kind];
       const li = el('li', {},
-        el('span', { class: 'badge ' + k.cls }, k.badge),
-        el('div', { class: 'meta' }, el('b', {}, it.name), el('small', {}, fmtSize(it.size) + ' · ' + new Date(it.time).toLocaleString())),
-        el('button', { 'aria-label': 'Quitar de recientes', onclick: async e => { e.stopPropagation(); await recent.remove(it.name); renderRecent(); } }, '✕'));
+        el('span', { class: 'tag ' + k.cls }, k.badge),
+        el('div', { class: 'meta' }, el('b', {}, it.name), el('small', {}, fmtDate(it.time) + ' · ' + fmtSize(it.size))),
+        el('button', { 'aria-label': 'Quitar de recientes', onclick: async e => { e.stopPropagation(); await recent.remove(it.name); renderRecent(); } }, UI.icon('x', 16)));
       li.addEventListener('click', async () => {
         await recent.add(it.name, it.bytes.slice(0));
         openEditor(kind, it.bytes.slice(0), it.name);
@@ -174,6 +181,9 @@
       if (params.files && params.files.length) openFile(await params.files[0].getFile());
     });
   }
+
+  // Íconos declarados en el HTML
+  document.querySelectorAll('[data-icon]').forEach(n => n.prepend(UI.icon(n.dataset.icon, n.classList.contains('icon-btn') ? 22 : n.closest('.foot') ? 14 : 20)));
 
   renderRecent();
 

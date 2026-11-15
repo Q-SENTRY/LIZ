@@ -177,9 +177,9 @@ const ExcelEditor = (() => {
     function renderTabs() {
       tabs.innerHTML = '';
       wb.SheetNames.forEach((n, i) => {
-        tabs.append(el('button', { class: 'xl-tab' + (i === sheetIdx ? ' on' : ''), onclick: () => (i === sheetIdx ? sheetMenu() : switchSheet(i)) }, n + (i === sheetIdx ? ' ⋯' : '')));
+        tabs.append(el('button', { class: 'xl-tab' + (i === sheetIdx ? ' on' : ''), onclick: () => (i === sheetIdx ? sheetMenu() : switchSheet(i)) }, n, i === sheetIdx ? UI.icon('more', 14) : null));
       });
-      tabs.append(el('button', { class: 'xl-tab', onclick: addSheet, title: 'Nueva hoja' }, '+'));
+      tabs.append(el('button', { class: 'xl-tab xl-add', onclick: addSheet, title: 'Nueva hoja', 'aria-label': 'Nueva hoja' }, UI.icon('plus', 16)));
     }
 
     function switchSheet(i) { commit(); sheetIdx = i; sel = { r: 0, c: 0 }; render(); grid.scrollTo(0, 0); }
@@ -194,8 +194,8 @@ const ExcelEditor = (() => {
 
     async function sheetMenu() {
       const v = await choose('Hoja "' + wb.SheetNames[sheetIdx] + '"', [
-        { label: '✏️ Cambiar nombre', value: 'rename' },
-        { label: '🗑 Eliminar hoja', value: 'delete' }
+        { label: 'Cambiar nombre', value: 'rename', icon: 'type' },
+        { label: 'Eliminar hoja', value: 'delete', icon: 'trash' }
       ]);
       if (v === 'rename') {
         const old = wb.SheetNames[sheetIdx];
@@ -318,13 +318,14 @@ const ExcelEditor = (() => {
       const tb = ctx.toolbar;
       tb.innerHTML = '';
       tb.append(
-        el('button', { class: 'tb', onclick: () => { ws()._extraRows = dims().rows + 20; render(); } }, '+ Filas'),
-        el('button', { class: 'tb', onclick: () => { ws()._extraCols = dims().cols + 5; render(); } }, '+ Columnas'),
-        el('button', { class: 'tb', onclick: () => { input.value = ''; commit(); refreshCells(); select(sel.r, sel.c); } }, '⌫ Borrar celda'),
-        el('button', { class: 'tb', title: 'Suma automática', onclick: autoSum }, 'Σ Suma'),
+        UI.tbBtn('sigma', 'Suma automática', autoSum, { label: 'Suma' }),
+        UI.tbBtn('clear', 'Borrar celda', () => { input.value = ''; commit(); refreshCells(); select(sel.r, sel.c); }, { label: 'Borrar' }),
         el('span', { class: 'tb-sep' }),
-        el('button', { class: 'tb', onclick: () => { fontScale = Math.max(0.6, fontScale - 0.15); table.style.fontSize = 14 * fontScale + 'px'; } }, 'A−'),
-        el('button', { class: 'tb', onclick: () => { fontScale = Math.min(2, fontScale + 0.15); table.style.fontSize = 14 * fontScale + 'px'; } }, 'A+')
+        UI.tbBtn('rows', 'Más filas', () => { ws()._extraRows = dims().rows + 20; render(); }, { label: 'Filas' }),
+        UI.tbBtn('cols', 'Más columnas', () => { ws()._extraCols = dims().cols + 5; render(); }, { label: 'Columnas' }),
+        el('span', { class: 'tb-sep' }),
+        UI.tbBtn('textDown', 'Texto más pequeño', () => { fontScale = Math.max(0.6, fontScale - 0.15); table.style.fontSize = 14 * fontScale + 'px'; }),
+        UI.tbBtn('textUp', 'Texto más grande', () => { fontScale = Math.min(2, fontScale + 0.15); table.style.fontSize = 14 * fontScale + 'px'; })
       );
     }
 
@@ -346,7 +347,7 @@ const ExcelEditor = (() => {
         else if (e.key === 'Escape') { input.value = input.dataset.orig; input.blur(); }
       });
       input.addEventListener('blur', () => { if (commit()) refreshCells(); });
-      const ok = el('button', { class: 'xl-ok', onclick: () => { commit(); refreshCells(); select(Math.min(sel.r + 1, dims().rows - 1), sel.c); } }, '✓');
+      const ok = el('button', { class: 'xl-ok', 'aria-label': 'Confirmar', onclick: () => { commit(); refreshCells(); select(Math.min(sel.r + 1, dims().rows - 1), sel.c); } }, UI.icon('check', 18));
       table = el('table', { class: 'xl' });
       table.addEventListener('click', e => {
         const td = e.target.closest('td');

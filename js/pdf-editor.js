@@ -16,17 +16,18 @@ const PdfEditor = (() => {
       const tb = ctx.toolbar;
       tb.innerHTML = '';
       for (const [k, label] of Object.entries(TOOLS)) {
-        tb.append(el('button', { class: 'tb' + (tool === k ? ' on' : ''), 'data-tool': k, onclick: () => setTool(k) },
-          { view: '✋', text: 'T', pen: '✏️', hl: '🖍', erase: '🧽' }[k] + ' ' + label));
+        const b = UI.tbBtn({ view: 'pointer', text: 'type', pen: 'pen', hl: 'marker', erase: 'eraser' }[k], label, () => setTool(k), { label, attrs: { 'data-tool': k } });
+        if (tool === k) b.classList.add('on');
+        tb.append(b);
       }
       const colorIn = el('input', { type: 'color', class: 'tb-color', value: color, title: 'Color' });
       colorIn.addEventListener('input', () => (color = colorIn.value));
-      tb.append(colorIn,
-        el('button', { class: 'tb', title: 'Deshacer', onclick: undo }, '↶'),
+      tb.append(el('span', { class: 'tb-sep' }), colorIn,
+        UI.tbBtn('undo', 'Deshacer', undo),
         el('span', { class: 'tb-sep' }),
-        el('button', { class: 'tb', title: 'Alejar', onclick: () => setZoom(zoom / 1.25) }, '−'),
-        el('button', { class: 'tb', title: 'Acercar', onclick: () => setZoom(zoom * 1.25) }, '+'),
-        el('button', { class: 'tb', title: 'Ajustar', onclick: () => setZoom(1) }, '↔'));
+        UI.tbBtn('minus', 'Alejar', () => setZoom(zoom / 1.25)),
+        UI.tbBtn('plus', 'Acercar', () => setZoom(zoom * 1.25)),
+        UI.tbBtn('fit', 'Ajustar al ancho', () => setZoom(1)));
     }
 
     function setTool(t) {
@@ -250,15 +251,15 @@ const PdfEditor = (() => {
         p.svg.style.pointerEvents = 'none';
         p.wrap = el('div', { class: 'pdf-page' }, p.canvas, p.svg);
         p.wrap._p = p;
-        const delBtn = el('button', {}, '🗑 Eliminar');
+        const delBtn = el('button', {}, UI.icon('trash', 15), el('span', {}, 'Eliminar'));
         delBtn.onclick = () => {
           p.deleted = !p.deleted;
           p.wrap.classList.toggle('deleted', p.deleted);
-          delBtn.textContent = p.deleted ? '↺ Restaurar' : '🗑 Eliminar';
+          delBtn.replaceChildren(UI.icon(p.deleted ? 'restore' : 'trash', 15), el('span', {}, p.deleted ? 'Restaurar' : 'Eliminar'));
           ctx.dirty();
         };
-        const label = el('div', { class: 'pdf-label' }, `Página ${i} de ${pdf.numPages}`,
-          el('button', { onclick: () => { p.extraRot = (p.extraRot + 90) % 360; layoutAll(); ctx.dirty(); } }, '⟳ Girar'), delBtn);
+        const label = el('div', { class: 'pdf-label' }, el('span', { class: 'pg' }, `${i} / ${pdf.numPages}`),
+          el('button', { onclick: () => { p.extraRot = (p.extraRot + 90) % 360; layoutAll(); ctx.dirty(); } }, UI.icon('rotate', 15), el('span', {}, 'Girar')), delBtn);
         container.append(p.wrap, label);
         attachPointer(p);
         pages.push(p);

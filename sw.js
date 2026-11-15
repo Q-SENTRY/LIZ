@@ -1,5 +1,5 @@
 /* Service worker: guarda la app en caché para usarla sin conexión */
-const CACHE = 'liz-docs-v1';
+const CACHE = 'folio-v2';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/ui.js', 'js/app.js', 'js/pdf-editor.js', 'js/excel-editor.js', 'js/word-editor.js', 'js/ppt-editor.js',
