@@ -44,7 +44,9 @@ const PdfEditor = (() => {
 
     function scaleFor(p) {
       const avail = Math.max(200, ctx.workspace.clientWidth - 16);
-      return (avail / baseWidth) * zoom;
+      // cada página se ajusta a su propio ancho (las horizontales y giradas también caben en pantalla)
+      const w = p.page.getViewport({ scale: 1, rotation: (p.page.rotate + p.extraRot) % 360 }).width || baseWidth;
+      return (avail / w) * zoom;
     }
 
     function viewportFor(p) {
@@ -274,7 +276,7 @@ const PdfEditor = (() => {
 
     async function save() {
       const { PDFDocument, StandardFonts, rgb, degrees, LineCapStyle } = PDFLib;
-      if (encrypted) toast('Aviso: el PDF estaba protegido; puede que no se guarde correctamente.');
+      if (encrypted) return saveFlattened();
       const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
       const font = await doc.embedFont(StandardFonts.Helvetica);
       const safe = str => [...str].map(ch => { try { font.encodeText(ch); return ch; } catch { return '?'; } }).join('');
@@ -293,9 +295,16 @@ const PdfEditor = (() => {
               });
             }
           } else {
+            // Orientar el texto según cómo se ve la página (páginas giradas)
+            const vp1 = p.page.getViewport({ scale: 1, rotation: (p.page.rotate + p.extraRot) % 360 });
+            const [vx, vy] = vp1.convertToViewportPoint(a.x, a.y);
+            const o = vp1.convertToPdfPoint(vx, vy), dn = vp1.convertToPdfPoint(vx, vy + 1), rt = vp1.convertToPdfPoint(vx + 1, vy);
+            const down = [dn[0] - o[0], dn[1] - o[1]];
+            const angle = Math.round(Math.atan2(rt[1] - o[1], rt[0] - o[0]) * 180 / Math.PI);
             a.text.split('\n').forEach((line, li) => {
               if (!line) return;
-              pg.drawText(safe(line), { x: a.x, y: a.y - a.size * (0.85 + li * 1.2), size: a.size, font, color: col });
+              const off = a.size * (0.85 + li * 1.2);
+              pg.drawText(safe(line), { x: a.x + down[0] * off, y: a.y + down[1] * off, size: a.size, font, color: col, rotate: degrees(angle) });
             });
           }
         }
@@ -305,6 +314,47 @@ const PdfEditor = (() => {
       for (const i of del) doc.removePage(i);
       const out = await doc.save();
       return new Blob([out], { type: 'application/pdf' });
+    }
+
+    /**
+     * PDF protegido con contraseña: pdf-lib no puede reescribirlo, así que se crea una copia
+     * sin contraseña con cada página como imagen de alta calidad y las anotaciones encima.
+     */
+    async function saveFlattened() {
+      const { PDFDocument, StandardFonts, rgb, LineCapStyle } = PDFLib;
+      const live = pages.filter(p => !p.deleted);
+      if (!live.length) throw new Error('No puedes eliminar todas las páginas.');
+      toast('El PDF tenía contraseña: se guardará una copia sin contraseña.', 4000);
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const safe = str => [...str].map(ch => { try { font.encodeText(ch); return ch; } catch { return '?'; } }).join('');
+      for (const p of live) {
+        const rot = (p.page.rotate + p.extraRot) % 360;
+        const vp1 = p.page.getViewport({ scale: 1, rotation: rot });
+        const k = Math.min(2.5, Math.sqrt(16e6 / (vp1.width * vp1.height)));
+        const vpk = p.page.getViewport({ scale: k, rotation: rot });
+        const c = document.createElement('canvas');
+        c.width = Math.ceil(vpk.width); c.height = Math.ceil(vpk.height);
+        const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+        await p.page.render({ canvasContext: g, viewport: vpk }).promise;
+        const jpg = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+        const img = await doc.embedJpg(await jpg.arrayBuffer());
+        const W = vp1.width, H = vp1.height;
+        const pg = doc.addPage([W, H]);
+        pg.drawImage(img, { x: 0, y: 0, width: W, height: H });
+        const pt = (x, y) => { const [vx, vy] = vp1.convertToViewportPoint(x, y); return { x: vx, y: H - vy }; };
+        for (const a of p.anns) {
+          const [r, gg, b] = hexToRgb(a.color);
+          const col = rgb(r, gg, b);
+          if (a.type === 'ink') {
+            for (let i = 1; i < a.pts.length; i++) pg.drawLine({ start: pt(...a.pts[i - 1]), end: pt(...a.pts[i]), thickness: a.width, color: col, opacity: a.opacity, lineCap: a.hl ? LineCapStyle.Butt : LineCapStyle.Round });
+          } else {
+            const o = pt(a.x, a.y);
+            a.text.split('\n').forEach((line, li) => { if (line) pg.drawText(safe(line), { x: o.x, y: o.y - a.size * (0.85 + li * 1.2), size: a.size, font, color: col }); });
+          }
+        }
+      }
+      return new Blob([await doc.save()], { type: 'application/pdf' });
     }
 
     function destroy() {

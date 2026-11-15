@@ -1,10 +1,12 @@
 /* Service worker: guarda la app en caché para usarla sin conexión */
-const CACHE = 'folio-v2';
+const CACHE = 'folio-v3';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/ui.js', 'js/app.js', 'js/pdf-editor.js', 'js/excel-editor.js', 'js/word-editor.js', 'js/ppt-editor.js',
   'vendor/jszip.min.js', 'vendor/pdf.min.js', 'vendor/pdf.worker.min.js', 'vendor/pdf-lib.min.js',
   'vendor/xlsx.full.min.js', 'vendor/mammoth.browser.min.js',
+  'fonts/inter-latin-wght-normal.woff2', 'fonts/inter-latin-ext-wght-normal.woff2',
+  'fonts/manrope-latin-wght-normal.woff2', 'fonts/manrope-latin-ext-wght-normal.woff2',
   'assets/blank.pptx', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'
 ];
 

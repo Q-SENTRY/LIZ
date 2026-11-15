@@ -32,17 +32,39 @@ python3 -m http.server 8000
 # abre http://localhost:8000
 ```
 
+## Compatibilidad verificada
+
+Cada formato se probó abriendo, editando y exportando archivos complejos (creados con Office y con LibreOffice),
+y verificando el resultado con LibreOffice y con lectores independientes:
+
+- **PDF:** páginas verticales, horizontales y giradas; imágenes; PDF con contraseña. Las anotaciones de texto
+  se exportan con la orientación correcta también en páginas giradas.
+- **Excel:** .xlsx, .xls, .ods y .csv con acentos; varias hojas; fechas, porcentajes y formatos numéricos;
+  celdas combinadas; 5 000 filas; fórmulas entre hojas (`'Hoja'!A1`). Las fórmulas se pueden escribir en español
+  o inglés (SUMA, PROMEDIO, SI, SI.ERROR, BUSCARV, SUMAR.SI, CONTAR.SI, INDICE, COINCIDIR, IZQUIERDA, FECHA…)
+  y se guardan en el formato que entiende Excel. Al abrir, la app comprueba sus cálculos contra los valores
+  guardados por Excel; si alguna fórmula no la puede reproducir, la deja intacta y el archivo exportado pide a Excel
+  que la recalcule.
+- **Word:** títulos, colores, tamaños, fuentes, resaltado, alineación, listas, tablas combinadas, imágenes PNG/JPG.
+  Al guardar se reutiliza el archivo original, así que **se conservan encabezados, pies de página, márgenes,
+  tamaño de página y estilos**.
+- **PowerPoint:** temas, fondos, imágenes, grupos, tablas, formas, viñetas por nivel y **gráficos** (barras,
+  líneas, áreas, circulares). Duplicar una diapositiva copia también sus gráficos.
+
 ## Límites conocidos
 
 - Los formatos antiguos binarios **.doc** y **.ppt** no son compatibles (guárdalos antes como .docx / .pptx).
-- Word: al guardar se genera un .docx nuevo con el contenido. Se conservan texto, títulos, listas, tablas,
-  imágenes y formato básico, pero los diseños complejos (columnas, encabezados/pies, cuadros flotantes) se simplifican.
-- PowerPoint: el texto que no editas conserva su formato original. Si cambias un párrafo, este toma el formato
-  de su primera palabra. Las formas complejas, gráficos y animaciones se muestran de forma aproximada,
-  pero se conservan intactos en el archivo.
-- Excel: las fórmulas que la app no conoce se guardan tal cual y Excel las recalcula al abrir.
-  El formato de celdas (colores, bordes) se puede perder al guardar.
-- PDF: no se edita el texto original del PDF; se agregan textos y dibujos encima.
+- Word: los cuadros de texto flotantes, columnas y saltos de página manuales se simplifican al guardar.
+- PowerPoint: si cambias un párrafo, toma el formato de su primera palabra. Las animaciones y SmartArt no se
+  muestran, pero se conservan intactos en el archivo.
+- Excel: el formato visual de las celdas (colores, bordes) puede perderse al guardar.
+- PDF: no se edita el texto original; se agregan textos y dibujos encima. Un PDF con contraseña se guarda como
+  copia sin contraseña con las páginas como imagen.
+
+## Tipografía
+
+La interfaz usa **Inter** y **Manrope** (licencia SIL Open Font License), incluidas en `fonts/`
+para que la app se vea igual en todos los teléfonos y funcione sin conexión.
 
 ## Estructura
 

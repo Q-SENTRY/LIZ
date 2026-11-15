@@ -3,37 +3,137 @@ const ExcelEditor = (() => {
   const { el, toast, prompt, choose, confirm } = UI;
   const MAX_ROWS = 3000, MAX_COLS = 120;
 
-  /* ---------- Mini evaluador de fórmulas ---------- */
+  /* ---------- Evaluador de fórmulas ---------- */
+  class FErr { constructor(code) { this.code = code; } }
+  const err = c => { throw new FErr(c); };
+  const flat = a => (Array.isArray(a) ? a.flat(Infinity) : [a]);
+  const nums = a => flat(a).filter(isNum);
+  function isNum(x) { return typeof x === 'number' && isFinite(x); }
+  function toNum(x) {
+    if (Array.isArray(x)) x = flat(x)[0];
+    if (x === '' || x == null) return 0;
+    if (typeof x === 'boolean') return +x;
+    const n = +x; if (isNaN(n)) err('VALUE'); return n;
+  }
+  const toStr = x => (Array.isArray(x) ? toStr(flat(x)[0]) : x == null ? '' : typeof x === 'boolean' ? (x ? 'TRUE' : 'FALSE') : String(x));
+  function truthy(x) { if (Array.isArray(x)) x = flat(x)[0]; return typeof x === 'string' ? (x.toUpperCase() === 'TRUE' || (x !== '' && x.toUpperCase() !== 'FALSE' && err('VALUE'))) : !!toNum(x); }
+  const EPOCH = Date.UTC(1899, 11, 30);
+  const serial = (y, m, d) => (Date.UTC(y, m - 1, d) - EPOCH) / 864e5;
+  const fromSerial = n => new Date(EPOCH + Math.floor(toNum(n)) * 864e5);
+  const rows2d = a => (Array.isArray(a) && Array.isArray(a[0]) ? a : Array.isArray(a) ? [a] : [[a]]);
+  function eq(a, b) {
+    if (typeof a === 'string' && typeof b === 'string') return a.toLowerCase() === b.toLowerCase();
+    return a === b || (a === '' && b === 0) || (a === 0 && b === '');
+  }
+  function crit(c) {
+    const m = /^(<=|>=|<>|=|<|>)?(.*)$/s.exec(toStr(c));
+    const op = m[1] || '=', raw = m[2];
+    const n = raw !== '' && !isNaN(+raw) ? +raw : null;
+    const re = n === null && /[*?]/.test(raw) ? new RegExp('^' + raw.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i') : null;
+    return v => {
+      if (n !== null && (op !== '=' && op !== '<>' ? !isNum(v) : false)) return false;
+      const cmpv = n !== null && isNum(v) ? v - n : n !== null ? NaN : toStr(v).toLowerCase().localeCompare(raw.toLowerCase());
+      switch (op) {
+        case '=': return re ? re.test(toStr(v)) : n !== null ? v === n || toStr(v) === raw : toStr(v).toLowerCase() === raw.toLowerCase();
+        case '<>': return re ? !re.test(toStr(v)) : n !== null ? v !== n : toStr(v).toLowerCase() !== raw.toLowerCase();
+        case '<': return cmpv < 0; case '>': return cmpv > 0; case '<=': return cmpv <= 0; case '>=': return cmpv >= 0;
+      }
+    };
+  }
+  function lookupExact(arr, key) { return arr.findIndex(v => eq(v, key) || (typeof key === 'string' && typeof v === 'string' && crit(key)(v))); }
+  function lookupApprox(arr, key) { let idx = -1; for (let i = 0; i < arr.length; i++) { if (arr[i] === '' || arr[i] == null) continue; if (isNum(key) ? arr[i] <= key : toStr(arr[i]).toLowerCase() <= toStr(key).toLowerCase()) idx = i; else break; } return idx; }
+  const round = (x, d, mode) => { const f = 10 ** d; const v = x * f; const r = mode === 'up' ? Math.sign(v) * Math.ceil(Math.abs(v) - 1e-9) : mode === 'down' ? Math.trunc(v) : Math.sign(v) * Math.round(Math.abs(v) + 1e-9); return r / f; };
+
   const FN = {
-    SUM: a => a.flat(Infinity).filter(isNum).reduce((s, x) => s + x, 0),
-    AVERAGE: a => { const n = a.flat(Infinity).filter(isNum); if (!n.length) throw 'DIV0'; return FN.SUM(n) / n.length; },
-    MIN: a => { const n = a.flat(Infinity).filter(isNum); return n.length ? Math.min(...n) : 0; },
-    MAX: a => { const n = a.flat(Infinity).filter(isNum); return n.length ? Math.max(...n) : 0; },
-    COUNT: a => a.flat(Infinity).filter(isNum).length,
-    COUNTA: a => a.flat(Infinity).filter(x => x !== '' && x != null).length,
-    ROUND: a => { const [x, d = 0] = a.map(toNum); const f = 10 ** d; return Math.round(x * f) / f; },
+    TRUE: () => true, FALSE: () => false,
+    SUM: a => nums(a).reduce((s, x) => s + x, 0),
+    AVERAGE: a => { const n = nums(a); if (!n.length) err('DIV0'); return n.reduce((s, x) => s + x, 0) / n.length; },
+    MIN: a => { const n = nums(a); return n.length ? Math.min(...n) : 0; },
+    MAX: a => { const n = nums(a); return n.length ? Math.max(...n) : 0; },
+    MEDIAN: a => { const n = nums(a).sort((x, y) => x - y); if (!n.length) err('NUM'); const h = n.length >> 1; return n.length % 2 ? n[h] : (n[h - 1] + n[h]) / 2; },
+    COUNT: a => nums(a).length,
+    COUNTA: a => flat(a).filter(x => x !== '' && x != null).length,
+    COUNTBLANK: a => flat(a).filter(x => x === '' || x == null).length,
+    PRODUCT: a => nums(a).reduce((s, x) => s * x, 1),
+    ROUND: a => round(toNum(a[0]), toNum(a[1] ?? 0)),
+    ROUNDUP: a => round(toNum(a[0]), toNum(a[1] ?? 0), 'up'),
+    ROUNDDOWN: a => round(toNum(a[0]), toNum(a[1] ?? 0), 'down'),
+    INT: a => Math.floor(toNum(a[0])),
+    MOD: a => { const d = toNum(a[1]); if (!d) err('DIV0'); const n = toNum(a[0]); return n - d * Math.floor(n / d); },
+    POWER: a => toNum(a[0]) ** toNum(a[1]),
     ABS: a => Math.abs(toNum(a[0])),
-    SQRT: a => Math.sqrt(toNum(a[0])),
-    IF: a => (truthy(a[0]) ? a[1] : a[2] ?? false),
-    CONCATENATE: a => a.flat(Infinity).map(x => x ?? '').join(''),
-    PRODUCT: a => a.flat(Infinity).filter(isNum).reduce((s, x) => s * x, 1),
-    TODAY: () => { const d = new Date(); return Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 864e5); }
+    SQRT: a => { const n = toNum(a[0]); if (n < 0) err('NUM'); return Math.sqrt(n); },
+    AND: a => flat(a).filter(x => x !== '').every(truthy),
+    OR: a => flat(a).filter(x => x !== '').some(truthy),
+    NOT: a => !truthy(a[0]),
+    CONCATENATE: a => flat(a).map(toStr).join(''),
+    CONCAT: a => flat(a).map(toStr).join(''),
+    LEN: a => toStr(a[0]).length,
+    UPPER: a => toStr(a[0]).toUpperCase(),
+    LOWER: a => toStr(a[0]).toLowerCase(),
+    TRIM: a => toStr(a[0]).trim().replace(/ +/g, ' '),
+    LEFT: a => toStr(a[0]).slice(0, a.length > 1 ? toNum(a[1]) : 1),
+    RIGHT: a => { const s = toStr(a[0]), n = a.length > 1 ? toNum(a[1]) : 1; return n ? s.slice(-n) : ''; },
+    MID: a => toStr(a[0]).substr(toNum(a[1]) - 1, toNum(a[2])),
+    TODAY: () => { const d = new Date(); return serial(d.getFullYear(), d.getMonth() + 1, d.getDate()); },
+    NOW: () => { const d = new Date(); return serial(d.getFullYear(), d.getMonth() + 1, d.getDate()) + (d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()) / 86400; },
+    DATE: a => serial(toNum(a[0]), toNum(a[1]), toNum(a[2])),
+    YEAR: a => fromSerial(a[0]).getUTCFullYear(),
+    MONTH: a => fromSerial(a[0]).getUTCMonth() + 1,
+    DAY: a => fromSerial(a[0]).getUTCDate(),
+    SUMIF: a => { const r = flat(a[0]), s = a.length > 2 ? flat(a[2]) : r, t = crit(a[1]); return r.reduce((acc, v, i) => acc + (t(v) && isNum(s[i]) ? s[i] : 0), 0); },
+    COUNTIF: a => { const t = crit(a[1]); return flat(a[0]).filter(t).length; },
+    AVERAGEIF: a => { const r = flat(a[0]), s = a.length > 2 ? flat(a[2]) : r, t = crit(a[1]); const v = r.map((x, i) => (t(x) && isNum(s[i]) ? s[i] : null)).filter(x => x !== null); if (!v.length) err('DIV0'); return v.reduce((x, y) => x + y, 0) / v.length; },
+    VLOOKUP: a => {
+      const rows = rows2d(a[1]), col = toNum(a[2]), approx = a.length < 4 || truthy(a[3]);
+      if (col < 1 || col > rows[0].length) err('REF');
+      const first = rows.map(r => r[0]);
+      const i = approx ? lookupApprox(first, a[0]) : lookupExact(first, a[0]);
+      if (i < 0) err('NA'); return rows[i][col - 1];
+    },
+    HLOOKUP: a => {
+      const rows = rows2d(a[1]), row = toNum(a[2]), approx = a.length < 4 || truthy(a[3]);
+      if (row < 1 || row > rows.length) err('REF');
+      const i = approx ? lookupApprox(rows[0], a[0]) : lookupExact(rows[0], a[0]);
+      if (i < 0) err('NA'); return rows[row - 1][i];
+    },
+    INDEX: a => {
+      const rows = rows2d(a[0]); let r = toNum(a[1]), c = a.length > 2 ? toNum(a[2]) : 0;
+      if (rows.length === 1 && a.length === 2) { c = r; r = 1; }
+      if (!c) c = 1;
+      const row = rows[r - 1]; if (!row || row[c - 1] === undefined) err('REF'); return row[c - 1];
+    },
+    MATCH: a => {
+      const arr = flat(a[1]), type = a.length > 2 ? toNum(a[2]) : 1;
+      const i = type === 0 ? lookupExact(arr, a[0]) : type > 0 ? lookupApprox(arr, a[0]) : -1;
+      if (i < 0) err('NA'); return i + 1;
+    }
   };
-  // Nombres en español
-  Object.assign(FN, { SUMA: FN.SUM, PROMEDIO: FN.AVERAGE, CONTAR: FN.COUNT, CONTARA: FN.COUNTA, REDONDEAR: FN.ROUND, RAIZ: FN.SQRT, SI: FN.IF, CONCATENAR: FN.CONCATENATE, PRODUCTO: FN.PRODUCT, HOY: FN.TODAY });
-  // Excel guarda las fórmulas en inglés con coma como separador
-  const ES_EN = { SUMA: 'SUM', PROMEDIO: 'AVERAGE', CONTAR: 'COUNT', CONTARA: 'COUNTA', REDONDEAR: 'ROUND', RAIZ: 'SQRT', SI: 'IF', CONCATENAR: 'CONCATENATE', PRODUCTO: 'PRODUCT', HOY: 'TODAY', VERDADERO: 'TRUE', FALSO: 'FALSE' };
+  // Nombres en español -> inglés (Excel guarda las fórmulas en inglés)
+  const ES_EN = {
+    SUMA: 'SUM', PROMEDIO: 'AVERAGE', CONTAR: 'COUNT', CONTARA: 'COUNTA', 'CONTAR.BLANCO': 'COUNTBLANK', REDONDEAR: 'ROUND',
+    'REDONDEAR.MAS': 'ROUNDUP', 'REDONDEAR.MENOS': 'ROUNDDOWN', RAIZ: 'SQRT', SI: 'IF', 'SI.ERROR': 'IFERROR', CONCATENAR: 'CONCATENATE',
+    PRODUCTO: 'PRODUCT', HOY: 'TODAY', AHORA: 'NOW', VERDADERO: 'TRUE', FALSO: 'FALSE', Y: 'AND', O: 'OR', NO: 'NOT', LARGO: 'LEN',
+    MAYUSC: 'UPPER', MINUSC: 'LOWER', ESPACIOS: 'TRIM', IZQUIERDA: 'LEFT', DERECHA: 'RIGHT', EXTRAE: 'MID', ENTERO: 'INT',
+    RESIDUO: 'MOD', POTENCIA: 'POWER', FECHA: 'DATE', ANO: 'YEAR', MES: 'MONTH', DIA: 'DAY', MEDIANA: 'MEDIAN',
+    'SUMAR.SI': 'SUMIF', 'CONTAR.SI': 'COUNTIF', 'PROMEDIO.SI': 'AVERAGEIF', BUSCARV: 'VLOOKUP', BUSCARH: 'HLOOKUP',
+    INDICE: 'INDEX', COINCIDIR: 'MATCH', ABS: 'ABS', MIN: 'MIN', MAX: 'MAX'
+  };
+  const normName = n => n.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   function toEnglish(f) {
     let out = '', inStr = false;
     for (let i = 0; i < f.length; i++) {
       const ch = f[i];
       if (ch === '"') { inStr = !inStr; out += ch; continue; }
       if (inStr) { out += ch; continue; }
+      if (ch === "'") { const j = f.indexOf("'", i + 1); if (j > i) { out += f.slice(i, j + 1); i = j; continue; } }
       if (ch === ';') { out += ','; continue; }
+      const b = /^(VERDADERO|FALSO)(?![\w(.])/i.exec(f.slice(i));
+      if (b && (i === 0 || !/[A-Za-z0-9_.$!]/.test(f[i - 1]))) { out += b[1].toUpperCase() === 'FALSO' ? 'FALSE' : 'TRUE'; i += b[0].length - 1; continue; }
       const m = /^[A-Za-zÁÉÍÓÚáéíóúÑñ_][A-Za-zÁÉÍÓÚáéíóúÑñ0-9_.]*(?=\s*\()/.exec(f.slice(i));
       if (m && (i === 0 || !/[A-Za-z0-9_.$]/.test(f[i - 1]))) {
-        const up = m[0].toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        out += ES_EN[up] || m[0].toUpperCase();
+        const up = normName(m[0]);
+        out += ES_EN[up] || up;
         i += m[0].length - 1;
         continue;
       }
@@ -41,57 +141,95 @@ const ExcelEditor = (() => {
     }
     return out;
   }
-  function isNum(x) { return typeof x === 'number' && isFinite(x); }
-  function toNum(x) { if (Array.isArray(x)) x = x.flat(Infinity)[0]; if (x === '' || x == null) return 0; if (typeof x === 'boolean') return +x; const n = +x; if (isNaN(n)) throw 'VALUE'; return n; }
-  function truthy(x) { return typeof x === 'string' ? x !== '' : !!toNum(x); }
 
-  function evaluate(formula, getCell) {
-    const src = formula.replace(/^=/, '');
-    let i = 0;
+  const ERR_TEXT = { DIV0: '#¡DIV/0!', VALUE: '#¡VALOR!', NA: '#N/A', REF: '#¡REF!', NUM: '#¡NUM!', NAME: '#¿NOMBRE?' };
+  const COL = '\\$?[A-Za-z]{1,3}', ROW = '\\$?\\d+';
+  const TOKEN = new RegExp(String.raw`\s*(?:` +
+    String.raw`((?:'(?:[^']|'')+'|[A-Za-z_À-ɏ][\w.À-ɏ]*)!)?(${COL}${ROW}(?::${COL}${ROW})?|${COL}:${COL}|${ROW}:${ROW})(?![\w(])` + // 1 hoja, 2 ref
+    String.raw`|(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\d+)` +            // 3 número
+    String.raw`|("(?:[^"]|"")*")` +                                     // 4 texto
+    String.raw`|([A-Za-z_][A-Za-z0-9_.]*)\s*\(` +                       // 5 función
+    String.raw`|(TRUE|FALSE|VERDADERO|FALSO)(?![\w(])` +                                // 6 lógico
+    String.raw`|(#[A-Z0-9/!?]+)` +                                      // 7 error literal
+    String.raw`|(<=|>=|<>|[-+*/^&=<>(),;%]))`, 'iy');                  // 8 operador
+  const tokCache = new Map();
+  function tokenize(src) {
+    if (tokCache.has(src)) return tokCache.get(src);
     const toks = [];
-    const re = /\s*(?:(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|("(?:[^"]|"")*")|(\$?[A-Za-z]{1,3}\$?\d+(?::\$?[A-Za-z]{1,3}\$?\d+)?)|([A-Za-z_][A-Za-z0-9_.]*)\s*\(|(<=|>=|<>|[-+*/^&=<>(),;:%]))/y;
+    let i = 0;
     while (i < src.length) {
-      re.lastIndex = i;
-      const m = re.exec(src);
-      if (!m) { if (/^\s*$/.test(src.slice(i))) break; throw 'NAME'; }
-      i = re.lastIndex;
-      if (m[1]) toks.push({ t: 'num', v: +m[1] });
-      else if (m[2]) toks.push({ t: 'str', v: m[2].slice(1, -1).replace(/""/g, '"') });
-      else if (m[3]) toks.push({ t: 'ref', v: m[3].replace(/\$/g, '').toUpperCase() });
-      else if (m[4]) toks.push({ t: 'fn', v: m[4].toUpperCase() });
-      else toks.push({ t: 'op', v: m[5] === ';' ? ',' : m[5] });
+      TOKEN.lastIndex = i;
+      const m = TOKEN.exec(src);
+      if (!m) { if (/^\s*$/.test(src.slice(i))) break; throw new FErr('NAME'); }
+      i = TOKEN.lastIndex;
+      if (m[2]) toks.push({ t: 'ref', sheet: m[1] ? m[1].slice(0, -1).replace(/^'|'$/g, '').replace(/''/g, "'") : null, v: m[2].replace(/\$/g, '').toUpperCase() });
+      else if (m[3]) toks.push({ t: 'num', v: +m[3] });
+      else if (m[4]) toks.push({ t: 'str', v: m[4].slice(1, -1).replace(/""/g, '"') });
+      else if (m[5]) toks.push({ t: 'fn', v: normName(m[5]) });
+      else if (m[6]) toks.push({ t: 'bool', v: /^(TRUE|VERDADERO)$/i.test(m[6]) });
+      else if (m[7]) toks.push({ t: 'err', v: m[7] });
+      else toks.push({ t: 'op', v: m[8] === ';' ? ',' : m[8] });
     }
+    if (tokCache.size > 20000) tokCache.clear();
+    tokCache.set(src, toks);
+    return toks;
+  }
+
+  /**
+   * Evalúa una fórmula. env: { get(sheet, r, c), bounds(sheet) -> {rows, cols} }
+   * sheet = null significa la hoja actual.
+   */
+  function evaluate(formula, env) {
+    if (typeof env === 'function') { const g = env; env = { get: (s, r, c) => g(r, c), bounds: () => ({ rows: 1e4, cols: 100 }) }; }
+    const toks = tokenize(formula.replace(/^=/, ''));
     let k = 0;
     const peek = () => toks[k], next = () => toks[k++];
-    const expect = v => { const t = next(); if (!t || t.v !== v) throw 'PARSE'; };
-    const refVal = r => {
+    const expect = v => { const t = next(); if (!t || t.v !== v) err('NAME'); };
+    function refVal(t) {
+      const r = t.v;
       if (r.includes(':')) {
-        const rg = XLSX.utils.decode_range(r), out = [];
-        for (let R = rg.s.r; R <= rg.e.r; R++) for (let C = rg.s.c; C <= rg.e.c; C++) out.push(getCell(R, C));
+        let [a, b] = r.split(':');
+        const bd = env.bounds(t.sheet);
+        if (/^[A-Z]+$/.test(a)) { a += '1'; b += bd.rows; }
+        else if (/^\d+$/.test(a)) { a = 'A' + a; b = XLSX.utils.encode_col(bd.cols - 1) + b; }
+        const rg = XLSX.utils.decode_range(a + ':' + b), out = [];
+        rg.e.r = Math.min(rg.e.r, rg.s.r + 1e5);
+        for (let R = rg.s.r; R <= rg.e.r; R++) { const row = []; for (let C = rg.s.c; C <= rg.e.c; C++) row.push(env.get(t.sheet, R, C)); out.push(row); }
         return out;
       }
       const a = XLSX.utils.decode_cell(r);
-      return getCell(a.r, a.c);
-    };
+      return env.get(t.sheet, a.r, a.c);
+    }
+    const tryArg = () => { try { return { v: cmp() }; } catch (e) { if (e instanceof FErr) { skipArg(); return { e }; } throw e; } };
+    function skipArg() { let depth = 0; while (k < toks.length) { const t = toks[k]; if (t.v === '(' || t.t === 'fn') depth++; else if (t.v === ')') { if (!depth) return; depth--; } else if (t.v === ',' && !depth) return; k++; } }
     function primary() {
       const t = next();
-      if (!t) throw 'PARSE';
-      if (t.t === 'num' || t.t === 'str') return t.v;
-      if (t.t === 'ref') return refVal(t.v);
+      if (!t) err('NAME');
+      if (t.t === 'num' || t.t === 'str' || t.t === 'bool') return t.v;
+      if (t.t === 'err') err(Object.keys(ERR_TEXT).find(c => ERR_TEXT[c] === t.v) || 'VALUE');
+      if (t.t === 'ref') return refVal(t);
       if (t.t === 'fn') {
+        const name = ES_EN[t.v] || t.v;
+        if (name === 'IF' || name === 'IFERROR') {
+          const args = [];
+          if (peek() && peek().v !== ')') { args.push(tryArg()); while (peek() && peek().v === ',') { next(); args.push(tryArg()); } }
+          expect(')');
+          const pick = x => { if (!x) return name === 'IF' ? false : 0; if (x.e) throw x.e; return x.v; };
+          if (name === 'IFERROR') return args[0] && !args[0].e ? args[0].v : pick(args[1]);
+          if (args[0].e) throw args[0].e;
+          return truthy(args[0].v) ? pick(args[1] || { v: true }) : pick(args[2]);
+        }
         const args = [];
         if (peek() && peek().v !== ')') { args.push(cmp()); while (peek() && peek().v === ',') { next(); args.push(cmp()); } }
         expect(')');
-        if (t.v === 'TRUE' || t.v === 'VERDADERO') return true;
-        if (t.v === 'FALSE' || t.v === 'FALSO') return false;
-        const f = FN[t.v];
-        if (!f) throw 'NAME';
+        const f = FN[name];
+        if (!f) err('NAME');
         return f(args);
       }
       if (t.v === '(') { const v = cmp(); expect(')'); return v; }
       if (t.v === '-') return -toNum(unary());
       if (t.v === '+') return toNum(unary());
-      throw 'PARSE';
+      err('NAME');
     }
     function unary() { let v = primary(); while (peek() && peek().v === '%') { next(); v = toNum(v) / 100; } return v; }
     function pow() { let v = unary(); while (peek() && peek().v === '^') { next(); v = toNum(v) ** toNum(unary()); } return v; }
@@ -99,24 +237,28 @@ const ExcelEditor = (() => {
       let v = pow();
       while (peek() && (peek().v === '*' || peek().v === '/')) {
         const o = next().v, r = toNum(pow());
-        if (o === '/' && r === 0) throw 'DIV0';
+        if (o === '/' && r === 0) err('DIV0');
         v = o === '*' ? toNum(v) * r : toNum(v) / r;
       }
       return v;
     }
     function add() { let v = mul(); while (peek() && (peek().v === '+' || peek().v === '-')) { const o = next().v; const r = mul(); v = o === '+' ? toNum(v) + toNum(r) : toNum(v) - toNum(r); } return v; }
-    function cat() { let v = add(); while (peek() && peek().v === '&') { next(); v = String(v ?? '') + String(add() ?? ''); } return v; }
+    function cat() { let v = add(); while (peek() && peek().v === '&') { next(); v = toStr(v) + toStr(add()); } return v; }
     function cmp() {
       let v = cat();
       while (peek() && ['=', '<', '>', '<=', '>=', '<>'].includes(peek().v)) {
-        const o = next().v, r = cat();
-        v = { '=': v == r, '<': v < r, '>': v > r, '<=': v <= r, '>=': v >= r, '<>': v != r }[o];
+        const o = next().v; let r = cat();
+        let a = Array.isArray(v) ? flat(v)[0] : v; r = Array.isArray(r) ? flat(r)[0] : r;
+        if (typeof a === 'string' && typeof r === 'string') { a = a.toLowerCase(); r = r.toLowerCase(); }
+        if (a === '') a = typeof r === 'string' ? '' : 0;
+        if (r === '') r = typeof a === 'string' ? '' : 0;
+        v = { '=': a === r, '<': a < r, '>': a > r, '<=': a <= r, '>=': a >= r, '<>': a !== r }[o];
       }
       return v;
     }
     const res = cmp();
-    if (k < toks.length) throw 'PARSE';
-    return Array.isArray(res) ? res[0] : res;
+    if (k < toks.length) err('NAME');
+    return Array.isArray(res) ? flat(res)[0] ?? 0 : res;
   }
 
   function create(ctx) {
@@ -266,6 +408,7 @@ const ExcelEditor = (() => {
         const cell = { ...parsed };
         if (prev && prev.z && cell.t === 'n' && !cell.z) cell.z = prev.z;
         if (prev && prev.s) cell.s = prev.s;
+        if (cell.f) setResult(cell, () => evaluate(cell.f, env()));
         s[a] = cell;
         // ampliar rango
         const rg = s['!ref'] ? XLSX.utils.decode_range(s['!ref']) : { s: { r: sel.r, c: sel.c }, e: { r: sel.r, c: sel.c } };
@@ -279,28 +422,89 @@ const ExcelEditor = (() => {
       return true;
     }
 
-    /** Recalcula las fórmulas de todas las hojas (varias pasadas para dependencias) */
+    /* Códigos de error de SheetJS <-> códigos internos */
+    const ERR_CODE = { DIV0: 0x07, VALUE: 0x0F, REF: 0x17, NAME: 0x1D, NUM: 0x24, NA: 0x2A };
+    const CODE_ERR = Object.fromEntries(Object.entries(ERR_CODE).map(([k, v]) => [v, k]));
+    function env() {
+      const cur = wb.SheetNames[sheetIdx];
+      const sheetOf = n => { const name = n == null ? env.cur : wb.SheetNames.find(x => x.toLowerCase() === n.toLowerCase()); const sh = name && wb.Sheets[name]; if (!sh) err('REF'); return sh; };
+      env.cur = cur;
+      return {
+        get(n, r, c) {
+          const x = sheetOf(n)[addr(r, c)];
+          if (!x || x.v == null || x.t === 'z') return '';
+          if (x.t === 'e') err(CODE_ERR[x.v] || 'VALUE');
+          if (x.t === 'd') return (x.v - EPOCH) / 864e5;
+          return x.v;
+        },
+        bounds(n) { const ref = sheetOf(n)['!ref']; const rg = ref ? XLSX.utils.decode_range(ref) : { e: { r: 0, c: 0 } }; return { rows: rg.e.r + 1, cols: rg.e.c + 1 }; },
+        at(name) { env.cur = name; return this; }
+      };
+    }
+    const same = (a, b) => {
+      if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+      if (typeof a === 'string' && typeof b === 'string') return a === b;
+      return a === b;
+    };
+    function setResult(cell, run) {
+      try {
+        const v = run();
+        cell.v = v === '' ? '' : v;
+        cell.t = typeof v === 'number' ? 'n' : typeof v === 'boolean' ? 'b' : 's';
+        delete cell.w;
+      } catch (e) {
+        if (!(e instanceof FErr)) throw e;
+        cell.t = 'e'; cell.v = ERR_CODE[e.code] ?? ERR_CODE.VALUE; cell.w = ERR_TEXT[e.code] || '#¡VALOR!';
+      }
+    }
+
+    /**
+     * Al abrir: compara el evaluador con los valores que guardó Excel.
+     * Las fórmulas que no sabemos reproducir se marcan _keep y no se tocan
+     * (Excel/LibreOffice las recalculan al abrir el archivo guardado).
+     */
+    function calibrate() {
+      const E = env();
+      for (const name of wb.SheetNames) {
+        const s = wb.Sheets[name];
+        E.at(name);
+        for (const k of Object.keys(s)) {
+          if (k[0] === '!') continue;
+          const cell = s[k];
+          if (!cell.f) continue;
+          if (cell.F) { cell._keep = true; continue; }        // fórmulas matriciales
+          let got, gotErr = null;
+          try { got = evaluate(cell.f, E); } catch (e) { if (!(e instanceof FErr)) throw e; gotErr = e.code; }
+          if (cell.v === undefined || cell.t === 'z') {         // sin valor guardado: calcular
+            if (gotErr === 'NAME') cell._keep = true; else setResult(cell, () => { if (gotErr) err(gotErr); return got; });
+            continue;
+          }
+          const ok = cell.t === 'e' ? gotErr && ERR_CODE[gotErr] === cell.v
+            : !gotErr && (same(got, cell.v) || (cell.t === 'd' && same(got, (cell.v - EPOCH) / 864e5)) || (got === '' && cell.v === 0));
+          if (!ok) cell._keep = true;
+        }
+      }
+    }
+
+    /** Recalcula las fórmulas de todas las hojas hasta estabilizar */
     function recalc() {
-      for (let pass = 0; pass < 4; pass++) {
+      const E = env();
+      for (let pass = 0; pass < 8; pass++) {
+        let changed = false;
         for (const name of wb.SheetNames) {
           const s = wb.Sheets[name];
-          const getCell = (r, c) => { const x = s[addr(r, c)]; return !x || x.v == null ? '' : x.v; };
+          E.at(name);
           for (const k of Object.keys(s)) {
             if (k[0] === '!') continue;
             const cell = s[k];
-            if (!cell.f) continue;
-            try {
-              const v = evaluate(cell.f, getCell);
-              cell.v = v; cell.t = typeof v === 'number' ? 'n' : typeof v === 'boolean' ? 'b' : 's';
-              delete cell.w;
-            } catch (e) {
-              if (e === 'DIV0' || e === 'VALUE') { cell.t = 'e'; cell.v = 0; cell.w = e === 'DIV0' ? '#¡DIV/0!' : '#¡VALOR!'; }
-              // fórmulas no soportadas: se conserva el valor del archivo y Excel la recalcula al abrir
-            }
+            if (!cell.f || cell._keep) continue;
+            const before = cell.t + ':' + cell.v;
+            setResult(cell, () => evaluate(cell.f, E));
+            if (before !== cell.t + ':' + cell.v) changed = true;
           }
         }
+        if (!changed) break;
       }
-      render.pending = true;
     }
 
     function refreshCells() {
@@ -374,6 +578,7 @@ const ExcelEditor = (() => {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[]]), 'Hoja1');
       }
       if (!wb.SheetNames.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[]]), 'Hoja1');
+      calibrate();
       api.ext = srcExt === 'csv' ? 'csv' : srcExt === 'ods' ? 'ods' : 'xlsx';
       buildToolbar();
       buildUI();
@@ -388,7 +593,19 @@ const ExcelEditor = (() => {
         return new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
       }
       for (const n of wb.SheetNames) { delete wb.Sheets[n]._extraRows; delete wb.Sheets[n]._extraCols; }
-      const out = XLSX.write(wb, { bookType: type, type: 'array', compression: true });
+      let out = XLSX.write(wb, { bookType: type, type: 'array', compression: true });
+      if (type === 'xlsx') {
+        // Pide a Excel/LibreOffice que recalculen todo al abrir (por si alguna fórmula no se pudo calcular aquí)
+        const zip = await JSZip.loadAsync(out);
+        const x = await zip.file('xl/workbook.xml').async('string');
+        if (!/<calcPr/.test(x)) zip.file('xl/workbook.xml', x.replace('</workbook>', '<calcPr calcId="0" fullCalcOnLoad="1"/></workbook>'));
+        // SheetJS añade un atributo "level" no válido en <col> (al venir de .xls): se quita
+        for (const f of Object.keys(zip.files).filter(n => /^xl\/worksheets\/[^/]+\.xml$/.test(n))) {
+          const t = await zip.file(f).async('string');
+          if (/<col\b[^>]* level="/.test(t)) zip.file(f, t.replace(/(<col\b[^>]*?) level="\d+"/g, '$1'));
+        }
+        out = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+      }
       return new Blob([out], { type: type === 'ods' ? 'application/vnd.oasis.opendocument.spreadsheet' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     }
 
@@ -398,5 +615,5 @@ const ExcelEditor = (() => {
     };
     return api;
   }
-  return { create, evaluate };
+  return { create, evaluate, toEnglish };
 })();

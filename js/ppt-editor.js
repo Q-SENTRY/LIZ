@@ -269,7 +269,11 @@ const PptEditor = (() => {
             ntx = b => tx({ x: +attr(o, 'x') + (b.x - attr(co, 'x')) * sx, y: +attr(o, 'y') + (b.y - attr(co, 'y')) * sy, w: b.w * sx, h: b.h * sy });
           }
           await renderChildren(n, part, root, slide, level, ntx);
-        } else if (n.localName === 'graphicFrame' && level === 0) renderTable(n, part, root, slide, tx);
+        } else if (n.localName === 'graphicFrame') {
+          const uri = attr(path(n, 'graphic/graphicData'), 'uri') || '';
+          if (/\/chart$/.test(uri)) await renderChart(n, part, root, tx);
+          else if (level === 0) renderTable(n, part, root, slide, tx);
+        }
       }
     }
 
@@ -330,6 +334,116 @@ const PptEditor = (() => {
         div._info = info;
         attachMove(div, info);
       }
+      root.append(div);
+    }
+
+
+    /* ---------- Gráficos (barras, líneas, áreas, circulares) ---------- */
+    async function renderChart(gf, part, root, tx) {
+      const x = kid(gf, 'xfrm');
+      const cref = path(gf, 'graphic/graphicData/chart');
+      const rid = cref && rAttr(cref, 'id');
+      if (!x || !rid || !part.rels[rid]) return;
+      const raw = boxOf(x), b = tx(raw);
+      const cp = await loadPart(part.rels[rid].target);
+      if (!cp) return;
+      const W = b.w * k, H = b.h * k;
+      const div = el('div', { class: 'ppt-shape' });
+      place(div, b, raw);
+      const plot = path(cp.doc.documentElement, 'chart/plotArea');
+      if (!plot) return;
+      const types = [...plot.children].filter(c => /Chart$/.test(c.localName));
+      if (!types.length) return;
+      const num = n => (n ? [...n.getElementsByTagNameNS('*', 'pt')].sort((a, b) => attr(a, 'idx') - attr(b, 'idx')).map(p => { const v = (kid(p, 'v') || {}).textContent; return v; }) : []);
+      const series = [];
+      for (const t of types) for (const ser of kids(t, 'ser')) {
+        const name = (ser.getElementsByTagNameNS('*', 'v')[0] && kid(ser, 'tx')) ? [...kid(ser, 'tx').getElementsByTagNameNS('*', 'v')].map(v => v.textContent).join(' ') : '';
+        const cats = num(kid(ser, 'cat') || kid(ser, 'xVal'));
+        const vals = num(kid(ser, 'val') || kid(ser, 'yVal')).map(v => +v || 0);
+        const fill = color(path(ser, 'spPr/solidFill')) || color(path(ser, 'spPr/ln/solidFill'));
+        series.push({ type: t.localName, dir: attr(kid(t, 'barDir'), 'val'), name, cats, vals, fill, ser });
+      }
+      if (!series.length) return;
+      const accents = ['accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6'].map(a => theme.colors[a] ? '#' + theme.colors[a] : null);
+      const pal = i => accents[i % 6] || ['#4472c4', '#ed7d31', '#a5a5a5', '#ffc000', '#5b9bd5', '#70ad47'][i % 6];
+      const titleEl = path(cp.doc.documentElement, 'chart/title');
+      let title = titleEl ? [...titleEl.getElementsByTagNameNS('*', 't')].map(t => t.textContent).join('') : '';
+      const autoDel = attr(path(cp.doc.documentElement, 'chart/autoTitleDeleted'), 'val');
+      if (!title && series.length === 1 && (titleEl || (autoDel !== '1' && autoDel !== 'true'))) title = series[0].name;
+      const fs = Math.max(9, Math.min(16, H * 0.045));
+      const esc = UI.xmlEsc;
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Calibri, Carlito, Arial, sans-serif" font-size="${fs}" fill="#404040">`;
+      let top = 6;
+      if (title) { svg += `<text x="${W / 2}" y="${fs * 1.5}" text-anchor="middle" font-size="${fs * 1.3}">${esc(title)}</text>`; top = fs * 2.4; }
+      const isPie = /pie|doughnut/i.test(series[0].type);
+      const legendItems = isPie ? series[0].cats.map((c, i) => ({ name: c, col: (() => { const dp = kids(series[0].ser, 'dPt').find(d => +attr(kid(d, 'idx'), 'val') === i); return (dp && color(path(dp, 'spPr/solidFill'))) || pal(i); })() }))
+        : series.map((s, i) => ({ name: s.name, col: s.fill || pal(i) }));
+      const showLegend = !!path(cp.doc.documentElement, 'chart/legend') && legendItems.some(l => l.name);
+      const bottom = H - (showLegend ? fs * 2.2 : 6);
+      if (showLegend) {
+        const itemW = legendItems.map(l => fs * 1.4 + String(l.name).length * fs * 0.55 + fs);
+        let lx = Math.max(4, (W - itemW.reduce((a, c) => a + c, 0)) / 2);
+        legendItems.forEach((l, i) => {
+          svg += `<rect x="${lx}" y="${H - fs * 1.5}" width="${fs * 0.8}" height="${fs * 0.8}" fill="${l.col}"/><text x="${lx + fs * 1.1}" y="${H - fs * 0.75}">${esc(l.name)}</text>`;
+          lx += itemW[i];
+        });
+      }
+      if (isPie) {
+        const s0 = series[0], total = s0.vals.reduce((a, c) => a + Math.max(0, c), 0) || 1;
+        const cx = W / 2, cy = (top + bottom) / 2, r = Math.max(4, Math.min(W, bottom - top) / 2 - 4);
+        const hole = /doughnut/i.test(s0.type) ? r * 0.5 : 0;
+        let a0 = -Math.PI / 2;
+        s0.vals.forEach((v, i) => {
+          const a1 = a0 + (Math.max(0, v) / total) * Math.PI * 2;
+          const large = a1 - a0 > Math.PI ? 1 : 0;
+          const p = (rad, a) => `${cx + rad * Math.cos(a)},${cy + rad * Math.sin(a)}`;
+          const d = hole ? `M${p(r, a0)}A${r},${r} 0 ${large} 1 ${p(r, a1)}L${p(hole, a1)}A${hole},${hole} 0 ${large} 0 ${p(hole, a0)}Z` : `M${cx},${cy}L${p(r, a0)}A${r},${r} 0 ${large} 1 ${p(r, a1)}Z`;
+          svg += `<path d="${s0.vals.length === 1 ? `M${cx - r},${cy}a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0` : d}" fill="${legendItems[i].col}" stroke="#fff" stroke-width="1"/>`;
+          a0 = a1;
+        });
+      } else {
+        const horiz = series.some(s => s.dir === 'bar');
+        const all = series.flatMap(s => s.vals);
+        let max = Math.max(0, ...all), min = Math.min(0, ...all);
+        if (max === min) max = min + 1;
+        const step = (() => { const rough = (max - min) / 5, mag = 10 ** Math.floor(Math.log10(rough)); return [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= rough); })();
+        max = Math.ceil(max / step) * step; min = Math.floor(min / step) * step;
+        const cats = series[0].cats.length ? series[0].cats : series[0].vals.map((_, i) => String(i + 1));
+        const n = cats.length;
+        const fmt = v => (Math.abs(v) >= 1000 ? v.toLocaleString() : String(+v.toFixed(2)));
+        const labW = horiz ? Math.min(W * 0.3, Math.max(...cats.map(c => String(c).length)) * fs * 0.55 + 8) : Math.max(...[max, min].map(v => fmt(v).length)) * fs * 0.6 + 8;
+        const L = labW, R = W - 8, T = top, B = bottom - fs * 1.6;
+        const scale = v => (horiz ? L + ((v - min) / (max - min)) * (R - L) : B - ((v - min) / (max - min)) * (B - T));
+        for (let v = min; v <= max + step / 2; v += step) {
+          const q = scale(v);
+          svg += horiz ? `<line x1="${q}" y1="${T}" x2="${q}" y2="${B}" stroke="#d9d9d9"/><text x="${q}" y="${B + fs * 1.2}" text-anchor="middle">${fmt(v)}</text>`
+            : `<line x1="${L}" y1="${q}" x2="${R}" y2="${q}" stroke="#d9d9d9"/><text x="${L - 6}" y="${q + fs * 0.35}" text-anchor="end">${fmt(v)}</text>`;
+        }
+        const band = ((horiz ? B - T : R - L) / n);
+        const bars = series.filter(s => /bar/i.test(s.type)), nb = bars.length;
+        cats.forEach((c, i) => {
+          const mid = (horiz ? T : L) + band * (i + 0.5);
+          svg += horiz ? `<text x="${L - 6}" y="${mid + fs * 0.35}" text-anchor="end">${esc(c)}</text>` : `<text x="${mid}" y="${B + fs * 1.2}" text-anchor="middle">${esc(c)}</text>`;
+        });
+        series.forEach((s, si) => {
+          const col = s.fill || pal(si);
+          if (/bar/i.test(s.type)) {
+            const bi = bars.indexOf(s), gw = band * 0.7, bw = gw / nb;
+            s.vals.forEach((v, i) => {
+              const o = (horiz ? T : L) + band * i + (band - gw) / 2 + bw * bi;
+              const a = scale(0), z = scale(v);
+              svg += horiz ? `<rect x="${Math.min(a, z)}" y="${o}" width="${Math.abs(z - a)}" height="${bw * 0.92}" fill="${col}"/>`
+                : `<rect x="${o}" y="${Math.min(a, z)}" width="${bw * 0.92}" height="${Math.abs(z - a)}" fill="${col}"/>`;
+            });
+          } else {
+            const pts = s.vals.map((v, i) => [L + band * (i + 0.5), scale(v)]);
+            if (/area/i.test(s.type)) svg += `<path d="M${pts[0][0]},${scale(0)}L${pts.map(p => p.join(',')).join('L')}L${pts[pts.length - 1][0]},${scale(0)}Z" fill="${col}" opacity=".75"/>`;
+            else svg += `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${col}" stroke-width="${Math.max(1.5, fs * 0.2)}" stroke-linejoin="round"/>` + pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${fs * 0.22}" fill="${col}"/>`).join('');
+          }
+        });
+        svg += horiz ? `<line x1="${scale(0)}" y1="${T}" x2="${scale(0)}" y2="${B}" stroke="#a6a6a6"/>` : `<line x1="${L}" y1="${scale(0)}" x2="${R}" y2="${scale(0)}" stroke="#a6a6a6"/>`;
+      }
+      div.innerHTML = svg + '</svg>';
       root.append(div);
     }
 
@@ -660,6 +774,35 @@ const PptEditor = (() => {
     async function ctDoc() { return parseXml(await zip.file('[Content_Types].xml').async('string')); }
     async function presRelsDoc() { return parseXml(await zip.file(relsPathOf(presPath)).async('string')); }
 
+    const OWNED = /\/(chart|chartEx|diagramData|diagramLayout|diagramQuickStyle|diagramColors|diagramDrawing|oleObject|package|chartStyle|chartColorStyle|chartUserShapes|themeOverride)$/;
+    function relTarget(fromPart, toPart) {
+      const a = fromPart.split('/').slice(0, -1), b = toPart.split('/');
+      let i = 0; while (i < a.length && a[i] === b[i]) i++;
+      return '../'.repeat(a.length - i) + b.slice(i).join('/');
+    }
+    /** Copia una parte del paquete (y las que le pertenecen) con un nombre nuevo */
+    async function copyPart(part, ct) {
+      const f = zip.file(part);
+      if (!f) return null;
+      const m = part.match(/^(.*?)(\d*)(\.[^./]+)$/);
+      let n = (+m[2] || 1) + 1, np;
+      do np = `${m[1]}${n++}${m[3]}`; while (zip.file(np));
+      zip.file(np, await f.async('uint8array'));
+      const ov = [...ct.documentElement.children].find(o => o.getAttribute('PartName') === '/' + part);
+      if (ov) { const c = ov.cloneNode(); c.setAttribute('PartName', '/' + np); ct.documentElement.append(c); }
+      const rf = zip.file(relsPathOf(part));
+      if (rf) {
+        const rd = parseXml(await rf.async('string'));
+        for (const r of [...rd.documentElement.children]) {
+          if (r.getAttribute('TargetMode') === 'External' || !OWNED.test(r.getAttribute('Type'))) continue;
+          const sub = await copyPart(resolvePath(part, r.getAttribute('Target')), ct);
+          if (sub) r.setAttribute('Target', relTarget(np, sub));
+        }
+        zip.file(relsPathOf(np), serialize(rd));
+      }
+      return np;
+    }
+
     async function duplicateSlide() {
       syncText();
       const src = slides[current];
@@ -671,10 +814,17 @@ const PptEditor = (() => {
       let relsXml = rf ? await rf.async('string') : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${NS.pr}"></Relationships>`;
       const rd = parseXml(relsXml);
       [...rd.documentElement.children].forEach(r => { if (/notesSlide$/.test(r.getAttribute('Type'))) r.remove(); });
+      const ct = await ctDoc();
+      // Gráficos, SmartArt y objetos incrustados no pueden compartirse entre diapositivas: se copian
+      for (const r of [...rd.documentElement.children]) {
+        if (r.getAttribute('TargetMode') === 'External' || !OWNED.test(r.getAttribute('Type'))) continue;
+        const target = resolvePath(src.path, r.getAttribute('Target'));
+        const copy = await copyPart(target, ct);
+        if (copy) r.setAttribute('Target', relTarget(newPath, copy));
+      }
       zip.file(newPath, serialize(doc));
       zip.file(relsPathOf(newPath), serialize(rd));
       // content types
-      const ct = await ctDoc();
       const ov = ct.createElementNS(NS.ct, 'Override');
       ov.setAttribute('PartName', '/' + newPath);
       ov.setAttribute('ContentType', 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml');
