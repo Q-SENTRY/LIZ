@@ -1,5 +1,5 @@
 /* Service worker: guarda la app en caché para usarla sin conexión */
-const CACHE = 'folio-v5';
+const CACHE = 'folio-v6';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/ui.js', 'js/importers.js', 'js/app.js', 'js/pdf-editor.js', 'js/excel-editor.js', 'js/word-editor.js', 'js/ppt-editor.js',

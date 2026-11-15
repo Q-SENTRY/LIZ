@@ -78,6 +78,18 @@ python3 -m http.server 8000
    borrar, girar y eliminar páginas.
 4. Con **Ver** (flecha) desplazas el documento; en **Seleccionar** también puedes desplazarlo tocando fuera de los elementos.
 
+## Quitar páginas y unir PDF
+
+- **Organizar páginas** (botón *Páginas* en la barra del PDF, o menú ⋯): cuadrícula con todas las páginas. Toca para
+  seleccionar una o varias y elige **Eliminar**, **Girar**, mover **Antes/Después**, **Mover a…** una posición,
+  **Extraer** (guarda solo esas páginas como un PDF nuevo) o **Añadir PDF** (inserta otro PDF o imágenes después de
+  la selección). Todo se puede deshacer.
+- Cada página también tiene sus botones **Girar** y **Eliminar** debajo.
+- **Unir PDF** (pantalla de inicio): elige varios PDF o imágenes, ordénalos y se abren como un solo documento listo
+  para guardar. También puedes usar ⋯ › *Añadir otro PDF al final* en un PDF abierto.
+- Al quitar o reordenar páginas se crea un PDF nuevo que copia solo lo necesario, así el archivo pesa menos.
+  Si no cambias páginas, se conserva el PDF original (marcadores, formularios y metadatos).
+
 ## Navegar, imprimir y exportar a PDF
 
 - Indicador **«página X de N»** abajo en PDF, presentaciones y documentos (en documentos es aproximado, como hoja Carta).

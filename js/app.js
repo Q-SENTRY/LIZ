@@ -101,6 +101,66 @@
     await openData(file.name, data);
   }
 
+  /* ----- Unir PDF ----- */
+  function pickFiles(accept, multiple) {
+    return new Promise(res => {
+      const input = el('input', { type: 'file', accept, multiple: !!multiple, hidden: true });
+      document.body.append(input);
+      input.addEventListener('change', () => { const f = [...input.files]; input.remove(); res(f); });
+      input.click();
+    });
+  }
+  const isPdfLike = f => ['pdf', 'image'].includes(kindOf(f.name));
+  async function toPdfBytes(f) {
+    const data = await readFile(f);
+    return kindOf(f.name) === 'image' ? Importers.imageToPdf(data, f.name) : data;
+  }
+  async function appendFiles(files) {
+    files = files.filter(isPdfLike);
+    if (!files.length || !editor || !editor.appendPdf) return;
+    loading(true, 'Uniendo…');
+    let total = 0;
+    try { for (const f of files) total += await editor.appendPdf(await toPdfBytes(f), f.name); }
+    catch (e) { loading(false); return UI.modal('No se pudo unir', String(e.message || e)); }
+    loading(false);
+    toast(`Se añadieron ${total} página${total === 1 ? '' : 's'} al final`);
+    if (editor.pages) editor.pages.goTo(editor.pages.count() - total);
+  }
+  /** Inicio › Unir PDF: elige varios PDF o imágenes, los ordena y abre el resultado */
+  async function mergeFlow() {
+    let files = (await pickFiles('.pdf,application/pdf,image/*', true)).filter(isPdfLike);
+    if (!files.length) return;
+    if (files.length > 1) {
+      // permitir ordenar antes de unir
+      const list = el('div', { class: 'merge-list' });
+      const draw = () => {
+        list.replaceChildren(...files.map((f, i) => el('div', { class: 'merge-item' },
+          el('span', { class: 'tag ' + (kindOf(f.name) === 'pdf' ? 't-pdf' : 't-ppt') }, tagText(f.name)),
+          el('span', { class: 'merge-name' }, f.name),
+          el('button', { class: 'icon-btn', 'aria-label': 'Subir', disabled: i === 0, onclick: () => { [files[i - 1], files[i]] = [files[i], files[i - 1]]; draw(); } }, UI.icon('arrowUp', 18)),
+          el('button', { class: 'icon-btn', 'aria-label': 'Quitar', onclick: () => { files.splice(i, 1); draw(); } }, UI.icon('x', 18)))));
+      };
+      draw();
+      const ok = await UI.modal('Unir PDF', el('div', {}, el('p', {}, 'Se unirán en este orden:'), list), [{ label: 'Cancelar', value: false }, { label: 'Unir', value: true, primary: true }]);
+      if (!ok || !files.length) return;
+    }
+    loading(true, 'Uniendo…');
+    let first;
+    try { first = await toPdfBytes(files[0]); } catch (e) { loading(false); return UI.modal('No se pudo abrir', String(e.message || e)); }
+    loading(false);
+    await openEditor('pdf', first, files.length > 1 ? 'PDF unido.pdf' : files[0].name.replace(/\.[^.]+$/, '') + '.pdf');
+    if (!editor || !editor.appendPdf) return;
+    if (editor.setSourceLabel) editor.setSourceLabel(0, files[0].name);
+    if (files.length > 1) {
+      loading(true, 'Uniendo…');
+      try { for (const f of files.slice(1)) await editor.appendPdf(await toPdfBytes(f), f.name); }
+      catch (e) { loading(false); return UI.modal('No se pudo unir', String(e.message || e)); }
+      loading(false);
+      isDirty = true;
+      toast(`Se unieron ${files.length} archivos · ${editor.pages.count()} páginas. Toca «Guardar» para descargar.`, 4500);
+    }
+  }
+
   /* ----- Navegación de páginas: indicador, ir a página y miniaturas ----- */
   let pagerRaf = 0, thumbsBuilt = -1, thumbObserver = null;
   function mountPager() {
@@ -237,11 +297,15 @@
     if (!editor) return;
     const opts = [];
     if (editor.pages) opts.push({ label: `Ir a ${editor.pages.label.toLowerCase()}…`, value: 'goto', icon: 'pages' });
+    if (editor.organizer) opts.push({ label: 'Organizar páginas (eliminar, mover, extraer)', value: 'org', icon: 'pages' });
+    if (editor.appendPdf) opts.push({ label: 'Añadir otro PDF al final', value: 'append', icon: 'plus' });
     opts.push({ label: 'Imprimir', value: 'print', icon: 'printer' });
     opts.push({ label: 'Exportar como PDF', value: 'pdf', icon: 'filePdf' });
     opts.push({ label: 'Compartir', value: 'share', icon: 'share' });
     const v = await choose('Opciones', opts);
     if (v === 'goto') openPageSheet();
+    else if (v === 'org') editor.organizer();
+    else if (v === 'append') appendFiles(await pickFiles('.pdf,application/pdf,image/*', true));
     else if (v === 'print') printDoc(false);
     else if (v === 'pdf') printDoc(true);
     else if (v === 'share') onShare();
@@ -318,13 +382,20 @@
     e.target.value = '';
     if (f) openFile(f);
   });
+  document.getElementById('btnMerge').addEventListener('click', mergeFlow);
   document.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
     const kind = b.dataset.new;
     const names = { word: 'Documento.docx', excel: 'Libro.xlsx', ppt: 'Presentación.pptx' };
     openEditor(kind, null, names[kind]);
   }));
   $('#btnBack').addEventListener('click', () => history.back());
-  window.addEventListener('popstate', () => { if (editor) goHome(); });
+  window.addEventListener('popstate', () => {
+    // una ventana superpuesta (p. ej. Organizar páginas) se cierra con "Atrás" sin salir del documento
+    if (window.__folioOverlay) { const f = window.__folioOverlay; window.__folioOverlay = null; f(); return; }
+    if (editor) goHome();
+  });
+  // cambió el número u orden de páginas: rehacer miniaturas e indicador
+  window.addEventListener('folio-pages-changed', () => { thumbsBuilt = -1; if (editor && editor.pages) updatePager(); });
   $('#btnSave').addEventListener('click', onSave);
   $('#btnShare').addEventListener('click', onShare);
   $('#btnMore').addEventListener('click', onMore);

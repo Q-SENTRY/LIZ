@@ -25,8 +25,9 @@ const PdfEditor = (() => {
   const cloneAnn = a => ({ ...a, pts: a.pts && a.pts.map(q => q.slice()), p1: a.p1 && a.p1.slice(), p2: a.p2 && a.p2.slice() });
 
   function create(ctx) {
-    let bytes, pdf, pages = [], zoom = 1, tool = 'view', shape = 'rect', color = '#d93025', widthLevel = 2, baseWidth = 0;
-    let observer, container, encrypted = false, sel = null;   // sel = { p, a }
+    let sources = [], pages = [], zoom = 1, tool = 'view', shape = 'rect', color = '#d93025', widthLevel = 2, baseWidth = 0;
+    let observer, container, sel = null;   // sel = { p, a }
+    let docName = 'documento';
     let undoStack = [], redoStack = [];
 
     /* ---------- Geometría ---------- */
@@ -63,7 +64,8 @@ const PdfEditor = (() => {
     }
 
     /* ---------- Historial (deshacer / rehacer) ---------- */
-    const snapshot = () => pages.map(p => ({ anns: p.anns.map(cloneAnn), extraRot: p.extraRot, deleted: p.deleted }));
+    // la foto incluye el orden de las páginas (eliminar, mover, unir PDFs también se deshacen)
+    const snapshot = () => pages.map(p => ({ p, anns: p.anns.map(cloneAnn), extraRot: p.extraRot }));
     function checkpoint() {
       undoStack.push(snapshot());
       if (undoStack.length > MAX_HISTORY) undoStack.shift();
@@ -72,16 +74,10 @@ const PdfEditor = (() => {
       ctx.dirty();
     }
     function restore(state) {
-      let relayout = false;
-      state.forEach((s, i) => {
-        const p = pages[i];
-        if (p.extraRot !== s.extraRot) relayout = true;
-        p.anns = s.anns.map(cloneAnn);
-        p.extraRot = s.extraRot;
-        setDeleted(p, s.deleted);
-      });
+      pages = state.map(st => { st.p.anns = st.anns.map(cloneAnn); st.p.extraRot = st.extraRot; return st.p; });
       sel = null;
-      if (relayout) layoutAll(); else pages.forEach(drawOverlay);
+      rebuildDom();
+      layoutAll();
       ctx.dirty();
     }
     function undo() {
@@ -123,7 +119,8 @@ const PdfEditor = (() => {
         widthLevel = +widthSel.value;
         if (sel && (sel.a.type === 'ink' || sel.a.type === 'line' || sel.a.type === 'rect' || sel.a.type === 'ellipse')) applyToSelection(a => { a.width = WIDTHS[widthLevel] * (a.hl ? 5 : 1); });
       });
-      tb.append(el('span', { class: 'tb-sep' }), colorIn, widthSel,
+      tb.append(el('span', { class: 'tb-sep' }), UI.tbBtn('pages', 'Organizar páginas: eliminar, mover, extraer, unir', organizer, { label: 'Páginas' }),
+        el('span', { class: 'tb-sep' }), colorIn, widthSel,
         el('span', { class: 'tb-sep' }),
         UI.tbBtn('minus', 'Alejar', () => setZoom(zoom / 1.25)),
         UI.tbBtn('plus', 'Acercar', () => setZoom(zoom * 1.25)),
@@ -492,7 +489,7 @@ const PdfEditor = (() => {
       }, { passive: false });
 
       p.svg.addEventListener('pointerdown', e => {
-        if (tool === 'view' || p.deleted || e.button > 0) return;
+        if (tool === 'view' || e.button > 0) return;
         const [vx, vy] = pos(e);
         if (tool === 'pen' || tool === 'hl') {
           e.preventDefault();
@@ -588,7 +585,6 @@ const PdfEditor = (() => {
 
       // Texto y borrar usan "click" para que el diálogo no se cierre con el mismo toque
       p.svg.addEventListener('click', e => {
-        if (p.deleted) return;
         const [vx, vy] = pos(e);
         if (tool === 'text') {
           const hit = hitTest(p, vx, vy);
@@ -623,50 +619,108 @@ const PdfEditor = (() => {
     }
 
     /* ---------- Páginas: girar / eliminar ---------- */
-    function setDeleted(p, v) {
-      p.deleted = v;
-      p.wrap.classList.toggle('deleted', v);
-      p.delBtn.replaceChildren(UI.icon(v ? 'restore' : 'trash', 15), el('span', {}, v ? 'Restaurar' : 'Eliminar'));
-    }
-
-    async function open(data) {
-      bytes = new Uint8Array(data);
+    /* ---------- Fuentes (uno o varios PDF) y páginas ---------- */
+    async function loadSource(data, label) {
+      const bytes = new Uint8Array(data);
+      const src = { bytes, encrypted: false, label };
       const task = pdfjsLib.getDocument({ data: bytes.slice(0) });
       task.onPassword = async (cb, reason) => {
-        const pw = await UI.prompt(reason === 2 ? 'Contraseña incorrecta' : 'PDF protegido', '', { label: 'Contraseña' });
+        const pw = await UI.prompt(reason === 2 ? 'Contraseña incorrecta' : `PDF protegido${label ? ': ' + label : ''}`, '', { label: 'Contraseña' });
         if (pw == null) { task.destroy(); return; }
-        encrypted = true;
+        src.encrypted = true;
         cb(pw);
       };
-      pdf = await task.promise;
+      src.pdf = await task.promise;
+      sources.push(src);
+      const list = [];
+      for (let i = 1; i <= src.pdf.numPages; i++) list.push(makePage(await src.pdf.getPage(i), sources.length - 1, i - 1));
+      return list;
+    }
+
+    function makePage(page, srcId, srcIndex) {
+      const p = { page, src: srcId, srcIndex, extraRot: 0, anns: [] };
+      p.canvas = el('canvas');
+      p.svg = document.createElementNS(SVGNS, 'svg');
+      p.svg.style.pointerEvents = tool === 'view' ? 'none' : 'auto';
+      p.wrap = el('div', { class: 'pdf-page' }, p.canvas, p.svg);
+      p.wrap._p = p;
+      p.num = el('span', { class: 'pg' });
+      p.label = el('div', { class: 'pdf-label' }, p.num,
+        el('button', { onclick: () => rotatePages([p]) }, UI.icon('rotate', 15), el('span', {}, 'Girar')),
+        el('button', { onclick: () => removePages([p]) }, UI.icon('trash', 15), el('span', {}, 'Eliminar')));
+      attachPointer(p);
+      return p;
+    }
+
+    /** Coloca las páginas en el orden actual y actualiza la numeración */
+    function rebuildDom() {
+      container.replaceChildren();
+      pages.forEach((p, i) => {
+        p.num.textContent = `${i + 1} / ${pages.length}`;
+        container.append(p.wrap, p.label);
+        if (!p.vp) p.vp = p.page.getViewport({ scale: scaleFor(p), rotation: totalRot(p) });
+      });
+      window.dispatchEvent(new Event('folio-pages-changed'));
+    }
+
+    function rotatePages(list) {
+      if (!list.length) return;
+      checkpoint();
+      list.forEach(p => { p.extraRot = (p.extraRot + 90) % 360; });
+      layoutAll();
+      window.dispatchEvent(new Event('folio-pages-changed'));
+    }
+    function removePages(list) {
+      if (!list.length) return false;
+      if (list.length >= pages.length) { toast('El documento debe conservar al menos una página'); return false; }
+      checkpoint();
+      pages = pages.filter(p => !list.includes(p));
+      if (sel && list.includes(sel.p)) sel = null;
+      rebuildDom();
+      toast(list.length === 1 ? 'Página eliminada · ↶ para deshacer' : `${list.length} páginas eliminadas · ↶ para deshacer`, 3000);
+      return true;
+    }
+    /** Mueve un grupo de páginas una posición antes (-1) o después (+1) */
+    function movePages(list, dir) {
+      const idx = list.map(p => pages.indexOf(p)).sort((a, b) => a - b);
+      if (!idx.length || (dir < 0 && idx[0] === 0) || (dir > 0 && idx[idx.length - 1] === pages.length - 1)) return false;
+      checkpoint();
+      const order = dir < 0 ? idx : idx.slice().reverse();
+      for (const i of order) { const t = pages[i]; pages[i] = pages[i + dir]; pages[i + dir] = t; }
+      rebuildDom();
+      return true;
+    }
+    function movePagesTo(list, pos) {
+      checkpoint();
+      const rest = pages.filter(p => !list.includes(p));
+      const ordered = pages.filter(p => list.includes(p));
+      rest.splice(Math.max(0, Math.min(rest.length, pos)), 0, ...ordered);
+      pages = rest;
+      rebuildDom();
+    }
+
+    /** Añade las páginas de otro PDF (o imagen convertida) en la posición indicada (al final por defecto) */
+    async function appendPdf(data, label, at = pages.length) {
+      const before = snapshot();
+      const added = await loadSource(data, label);
+      pages.splice(at, 0, ...added);
+      undoStack.push(before); redoStack = []; updateHistoryButtons(); ctx.dirty();
+      rebuildDom();
+      layoutAll();
+      return added.length;
+    }
+
+    async function open(data, name) {
+      docName = (name || 'documento').replace(/\.[^.]+$/, '');
       buildToolbar();
       container = el('div', { class: 'pdf-pages' });
       ctx.workspace.append(container);
       observer = new IntersectionObserver(entries => {
         for (const en of entries) if (en.isIntersecting) renderPage(en.target._p);
       }, { root: ctx.workspace, rootMargin: '600px 0px' });
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        if (i === 1) baseWidth = page.getViewport({ scale: 1 }).width;
-        const p = { page, index: i - 1, extraRot: 0, anns: [], deleted: false };
-        p.canvas = el('canvas');
-        p.svg = document.createElementNS(SVGNS, 'svg');
-        p.svg.style.pointerEvents = 'none';
-        p.wrap = el('div', { class: 'pdf-page' }, p.canvas, p.svg);
-        p.wrap._p = p;
-        p.delBtn = el('button', {}, UI.icon('trash', 15), el('span', {}, 'Eliminar'));
-        p.delBtn.onclick = () => {
-          if (!p.deleted && pages.filter(x => !x.deleted).length === 1) return toast('El documento debe conservar al menos una página');
-          checkpoint();
-          setDeleted(p, !p.deleted);
-        };
-        const label = el('div', { class: 'pdf-label' }, el('span', { class: 'pg' }, `${i} / ${pdf.numPages}`),
-          el('button', { onclick: () => { checkpoint(); p.extraRot = (p.extraRot + 90) % 360; layoutAll(); } }, UI.icon('rotate', 15), el('span', {}, 'Girar')), p.delBtn);
-        container.append(p.wrap, label);
-        attachPointer(p);
-        pages.push(p);
-      }
+      pages = await loadSource(data, name);
+      baseWidth = pages[0].page.getViewport({ scale: 1 }).width;
+      rebuildDom();
       layoutAll();
       setTool('view');
       let rt;
@@ -728,20 +782,46 @@ const PdfEditor = (() => {
       }
     }
 
-    async function save() {
+    /**
+     * Guarda el documento (o solo las páginas indicadas).
+     * Si el orden y las páginas no cambiaron se modifica el PDF original (conserva marcadores, formularios y metadatos);
+     * si se quitaron, movieron o unieron páginas se arma un PDF nuevo copiando solo lo necesario (archivo más liviano).
+     */
+    async function save(list) {
       const { PDFDocument, StandardFonts, degrees } = PDFLib;
-      if (encrypted) return saveFlattened();
-      const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      list = list || pages;
+      if (!list.length) throw new Error('No hay páginas para guardar.');
+      if (list.some(p => sources[p.src].encrypted)) return saveFlattened(list);
+      const intact = list.length === sources[0].pdf.numPages && list.every((p, i) => p.src === 0 && p.srcIndex === i);
+      let doc, targets;
+      if (intact) {
+        doc = await PDFDocument.load(sources[0].bytes, { ignoreEncryption: true });
+        targets = list.map(p => doc.getPage(p.srcIndex));
+      } else {
+        doc = await PDFDocument.create();
+        const loaded = new Map();
+        const srcDoc = async id => { if (!loaded.has(id)) loaded.set(id, await PDFDocument.load(sources[id].bytes, { ignoreEncryption: true })); return loaded.get(id); };
+        // metadatos del primer documento
+        try {
+          const first = await srcDoc(list[0].src);
+          const t = first.getTitle(), au = first.getAuthor();
+          if (t) doc.setTitle(t);
+          if (au) doc.setAuthor(au);
+        } catch {}
+        targets = [];
+        for (const p of list) {
+          const [copy] = await doc.copyPages(await srcDoc(p.src), [p.srcIndex]);
+          targets.push(doc.addPage(copy));
+        }
+      }
       const fonts = { regular: await doc.embedFont(StandardFonts.Helvetica), bold: await doc.embedFont(StandardFonts.HelveticaBold) };
       const imgCache = new Map();
-      for (const p of pages) {
-        const pg = doc.getPage(p.index);
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i], pg = targets[i];
         if (p.extraRot) pg.setRotation(degrees((pg.getRotation().angle + p.extraRot) % 360));
         await drawAnnotations(doc, pg, p, q => q, fonts, imgCache);
       }
-      const del = pages.filter(p => p.deleted).map(p => p.index).sort((a, b) => b - a);
-      if (del.length === pages.length) throw new Error('No puedes eliminar todas las páginas.');
-      for (const i of del) doc.removePage(i);
+      doc.setProducer('Folio');
       return new Blob([await doc.save()], { type: 'application/pdf' });
     }
 
@@ -749,10 +829,9 @@ const PdfEditor = (() => {
      * PDF protegido con contraseña: pdf-lib no puede reescribirlo, así que se crea una copia
      * sin contraseña con cada página como imagen de alta calidad y las anotaciones encima.
      */
-    async function saveFlattened() {
+    async function saveFlattened(live) {
       const { PDFDocument, StandardFonts } = PDFLib;
-      const live = pages.filter(p => !p.deleted);
-      if (!live.length) throw new Error('No puedes eliminar todas las páginas.');
+      live = live || pages;
       toast('El PDF tenía contraseña: se guardará una copia sin contraseña.', 4000);
       const doc = await PDFDocument.create();
       const fonts = { regular: await doc.embedFont(StandardFonts.Helvetica), bold: await doc.embedFont(StandardFonts.HelveticaBold) };
@@ -779,7 +858,7 @@ const PdfEditor = (() => {
       observer && observer.disconnect();
       window.removeEventListener('resize', api._onResize);
       document.removeEventListener('keydown', onKey);
-      pdf && pdf.destroy();
+      sources.forEach(sr => sr.pdf && sr.pdf.destroy());
     }
 
     /* ---------- Navegación de páginas ---------- */
@@ -795,24 +874,142 @@ const PdfEditor = (() => {
         pagesApi.target = i; pagesApi._settling = true; clearTimeout(pagesApi._t); pagesApi._t = setTimeout(() => { pagesApi._settling = false; }, 900);
         ctx.workspace.scrollTo({ top: p.wrap.offsetTop - 12, behavior: 'smooth' });
       },
-      async thumb(i, width) {
-        const p = pages[i];
-        const vp1 = vpAt(p, totalRot(p));
-        const k = (width * Math.min(2, window.devicePixelRatio || 1)) / vp1.width;
-        const vp = p.page.getViewport({ scale: k, rotation: totalRot(p) });
-        const c = el('canvas', { width: Math.ceil(vp.width), height: Math.ceil(vp.height) });
-        await p.page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-        if (p.anns.length) {
-          const svg = cleanSvg(p);
-          svg.setAttribute('width', c.width); svg.setAttribute('height', c.height);
-          const img = new Image();
-          await new Promise(r => { img.onload = r; img.onerror = r; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg)); });
-          try { c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); } catch {}
-        }
-        if (p.deleted) c.style.opacity = '.3';
-        return c;
-      }
+      thumb: (i, width) => thumbFor(pages[i], width)
     };
+
+    /** Miniatura de una página (con anotaciones), en caché mientras no cambie */
+    async function thumbFor(p, width) {
+      const key = `${width}|${p.extraRot}|${p.anns.length}|${JSON.stringify(p.anns.map(a => [a.x, a.y, a.w, a.pts && a.pts.length]))}`;
+      if (p._thumb && p._thumbKey === key) { const c = p._thumb.cloneNode(); c.getContext('2d').drawImage(p._thumb, 0, 0); return c; }
+      const vp1 = vpAt(p, totalRot(p));
+      const k = (width * Math.min(2, window.devicePixelRatio || 1)) / vp1.width;
+      const vp = p.page.getViewport({ scale: k, rotation: totalRot(p) });
+      const c = el('canvas', { width: Math.ceil(vp.width), height: Math.ceil(vp.height) });
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      await p.page.render({ canvasContext: g, viewport: vp }).promise;
+      if (p.anns.length) {
+        if (!p.vp) p.vp = p.page.getViewport({ scale: scaleFor(p), rotation: totalRot(p) });
+        const svg = cleanSvg(p);
+        svg.setAttribute('width', c.width); svg.setAttribute('height', c.height);
+        const img = new Image();
+        await new Promise(r => { img.onload = r; img.onerror = r; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg)); });
+        try { g.drawImage(img, 0, 0, c.width, c.height); } catch {}
+      }
+      p._thumb = c; p._thumbKey = key;
+      const out = c.cloneNode(); out.getContext('2d').drawImage(c, 0, 0);
+      return out;
+    }
+
+    /* ---------- Organizar páginas: seleccionar, girar, mover, extraer, eliminar, añadir PDF ---------- */
+    function organizer() {
+      const chosen = new Set();
+      const count = el('span', { class: 'org-count' });
+      const grid = el('div', { class: 'org-grid' });
+      const btn = (icon, label, fn, needSel = true) => { const b = el('button', { class: 'org-btn', onclick: fn, 'data-sel': needSel ? 1 : null }, UI.icon(icon, 18), el('span', {}, label)); return b; };
+      const selected = () => pages.filter(p => chosen.has(p));
+      const actions = el('div', { class: 'org-actions' },
+        btn('check', 'Todas', () => { if (chosen.size === pages.length) chosen.clear(); else pages.forEach(p => chosen.add(p)); refresh(); }, false),
+        btn('rotate', 'Girar', () => { rotatePages(selected()); render(); }),
+        btn('back', 'Antes', () => { if (movePages(selected(), -1)) render(); }),
+        btn('chevron', 'Después', () => { if (movePages(selected(), 1)) render(); }),
+        btn('pages', 'Mover a…', async () => {
+          const v = await UI.prompt('Mover a la posición', '1', { label: `Número de página (1 a ${pages.length - chosen.size + 1})` });
+          const n = parseInt(v); if (!n) return;
+          movePagesTo(selected(), n - 1); render();
+        }),
+        btn('filePdf', 'Extraer', extract),
+        btn('trash', 'Eliminar', () => { const list = selected(); if (removePages(list)) { list.forEach(p => chosen.delete(p)); render(); } }),
+        btn('plus', 'Añadir PDF', addFiles, false),
+        el('span', { class: 'org-sep' }),
+        btn('undo', 'Deshacer', () => { undo(); chosen.forEach(p => { if (!pages.includes(p)) chosen.delete(p); }); render(); }, false),
+        btn('redo', 'Rehacer', () => { redo(); chosen.forEach(p => { if (!pages.includes(p)) chosen.delete(p); }); render(); }, false));
+      const done = el('button', { class: 'btn primary org-done', onclick: () => close() }, 'Listo');
+      const root = el('div', { class: 'organizer', role: 'dialog', 'aria-label': 'Organizar páginas' },
+        el('header', { class: 'org-head' }, el('div', {}, el('h3', {}, 'Organizar páginas'), count), done),
+        actions, el('p', { class: 'org-hint' }, 'Toca las páginas para seleccionarlas.'), grid);
+      document.body.append(root);
+
+      const width = Math.min(150, Math.floor((Math.min(window.innerWidth, 1100) - 64) / (window.innerWidth < 600 ? 3 : 5)));
+      let obs;
+      function render() {
+        if (obs) obs.disconnect();
+        grid.replaceChildren();
+        obs = new IntersectionObserver(entries => {
+          for (const en of entries) {
+            if (!en.isIntersecting || en.target._done) continue;
+            en.target._done = true;
+            const p = en.target._p;
+            thumbFor(p, width).then(c => en.target.querySelector('.org-img').replaceChildren(c)).catch(() => {});
+          }
+        }, { root: grid, rootMargin: '400px 0px' });
+        pages.forEach((p, i) => {
+          const multi = sources.length > 1;
+          const tile = el('button', { class: 'org-tile', 'aria-pressed': chosen.has(p) ? 'true' : 'false' },
+            el('span', { class: 'org-img', style: { width: width + 'px', minHeight: Math.round(width * 1.3) + 'px' } }),
+            el('span', { class: 'org-check' }, UI.icon('check', 14)),
+            el('span', { class: 'org-num' }, String(i + 1), multi ? el('small', {}, ' · ' + (sources[p.src].label || '').replace(/\.[^.]+$/, '').slice(0, 14)) : null));
+          tile._p = p;
+          tile.addEventListener('click', () => { if (chosen.has(p)) chosen.delete(p); else chosen.add(p); refresh(); });
+          grid.append(tile);
+          obs.observe(tile);
+        });
+        refresh();
+      }
+      function refresh() {
+        count.textContent = `${pages.length} página${pages.length === 1 ? '' : 's'}` + (chosen.size ? ` · ${chosen.size} seleccionada${chosen.size === 1 ? '' : 's'}` : '');
+        grid.querySelectorAll('.org-tile').forEach(t => t.setAttribute('aria-pressed', chosen.has(t._p) ? 'true' : 'false'));
+        actions.querySelectorAll('[data-sel]').forEach(b => { b.disabled = !chosen.size; });
+      }
+      async function extract() {
+        const list = selected();
+        if (!list.length) return;
+        UI.loading(true, 'Extrayendo…');
+        try {
+          const blob = await save(list);
+          const nums = list.map(p => pages.indexOf(p) + 1);
+          const range = nums.length > 3 ? `${nums[0]}-${nums[nums.length - 1]}` : nums.join(',');
+          UI.loading(false);
+          await UI.download(blob, `${docName} (pág ${range}).pdf`);
+          if (!UI.android) toast(`Se guardó un PDF con ${list.length} página${list.length === 1 ? '' : 's'}`);
+        } catch (e) { UI.loading(false); UI.modal('No se pudo extraer', String(e.message || e)); }
+      }
+      async function addFiles() {
+        const input = el('input', { type: 'file', accept: '.pdf,application/pdf,image/*', multiple: true, hidden: true });
+        document.body.append(input);
+        input.addEventListener('change', async () => {
+          const files = [...input.files];
+          input.remove();
+          if (!files.length) return;
+          const sel2 = selected();
+          let at = sel2.length ? pages.indexOf(sel2[sel2.length - 1]) + 1 : pages.length;
+          let total = 0;
+          UI.loading(true, 'Añadiendo…');
+          try {
+            for (const f of files) {
+              let data = await UI.readFile(f);
+              if (Importers.kindOf(f.name) === 'image') data = await Importers.imageToPdf(data, f.name);
+              const n = await appendPdf(data, f.name, at);
+              at += n; total += n;
+            }
+          } catch (e) { UI.loading(false); return UI.modal('No se pudo añadir', String(e.message || e)); }
+          UI.loading(false);
+          toast(`Se añadieron ${total} página${total === 1 ? '' : 's'}`);
+          render();
+        });
+        input.click();
+      }
+      function close(fromHistory) {
+        if (obs) obs.disconnect();
+        root.remove();
+        window.__folioOverlay = null;
+        const first = selected()[0];
+        if (first) pagesApi.goTo(pages.indexOf(first));
+        if (!fromHistory) history.back();
+      }
+      history.pushState({ overlay: 'organizer' }, '');
+      window.__folioOverlay = () => close(true);
+      render();
+    }
 
     /** Contenido para imprimir: cada página como imagen nítida con sus anotaciones, a su tamaño original */
     async function printable() {
@@ -820,7 +1017,6 @@ const PdfEditor = (() => {
       const sizes = new Map();
       let css = '';
       for (const p of pages) {
-        if (p.deleted) continue;
         const rot = totalRot(p), vp1 = vpAt(p, rot);
         const wIn = +(vp1.width / 72).toFixed(3), hIn = +(vp1.height / 72).toFixed(3);
         const key = wIn + 'x' + hIn;
@@ -837,7 +1033,7 @@ const PdfEditor = (() => {
       return { node: root, page: css + '@page { margin: 0; }' };
     }
 
-    const api = { open, save, destroy, ext: 'pdf', kind: 'pdf', pages: pagesApi, printable, undo, redo };
+    const api = { open, save: () => save(), destroy, ext: 'pdf', kind: 'pdf', pages: pagesApi, printable, undo, redo, organizer, appendPdf, setSourceLabel: (i, l) => { if (sources[i]) sources[i].label = l; } };
     return api;
   }
   return { create };
