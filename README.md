@@ -57,6 +57,27 @@ python3 -m http.server 8000
 # abre http://localhost:8000
 ```
 
+## Formatos que abre
+
+| Tipo | Extensiones |
+|---|---|
+| PDF | .pdf |
+| Documentos | .docx .docm .dotx .dotm · **.doc** (texto) · .odt .ott · .rtf · .md · .html .htm · .txt y archivos de texto/código (.json .xml .csv .log .py .js…) |
+| Hojas de cálculo | .xlsx .xlsm .xlsb .xls .xltx .ods .fods .csv .tsv **.numbers** .dif .slk .dbf .wk1–.wk4 .qpw .et |
+| Presentaciones | .pptx .pptm .ppsx .potx · **.ppt** y .odp (texto e imágenes de cada diapositiva) |
+| Imágenes | .jpg .png .webp .gif .bmp .svg (se abren como PDF para anotarlas) |
+
+## Navegar, imprimir y exportar a PDF
+
+- Indicador **«página X de N»** abajo en PDF, presentaciones y documentos (en documentos es aproximado, como hoja Carta).
+  Tócalo para **ir a una página** escribiendo el número o eligiendo una **miniatura**; en documentos también aparece
+  el **índice de títulos**. En tablet y computadora las miniaturas se muestran en un panel lateral.
+- En Excel, toca la referencia de celda (A1) para **ir a una celda**, también en otra hoja (`Hoja2!B10`).
+- Menú **⋯ › Imprimir** o **Exportar como PDF**. Se abre el diálogo de impresión del sistema, donde puedes elegir
+  una impresora o **«Guardar como PDF»** (Android, iPhone y computadora). El PDF conserva el tamaño original de cada
+  página; las presentaciones salen una diapositiva por hoja.
+- Atajos con teclado: Ctrl+S guardar, Ctrl+P imprimir, Ctrl+G ir a página.
+
 ## Compatibilidad verificada
 
 Cada formato se probó abriendo, editando y exportando archivos complejos (creados con Office y con LibreOffice),
@@ -78,7 +99,7 @@ y verificando el resultado con LibreOffice y con lectores independientes:
 
 ## Límites conocidos
 
-- Los formatos antiguos binarios **.doc** y **.ppt** no son compatibles (guárdalos antes como .docx / .pptx).
+- De los formatos antiguos **.doc** y **.ppt** se recupera el texto (y las tablas en .doc), no el diseño.
 - Word: los cuadros de texto flotantes, columnas y saltos de página manuales se simplifican al guardar.
 - PowerPoint: si cambias un párrafo, toma el formato de su primera palabra. Las animaciones y SmartArt no se
   muestran, pero se conservan intactos en el archivo.

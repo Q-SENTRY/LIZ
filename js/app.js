@@ -3,19 +3,14 @@
   const { $, el, toast, loading, confirm, choose, download, share, readFile, recent } = UI;
 
   const KINDS = {
-    pdf: { exts: ['pdf'], factory: PdfEditor, badge: 'PDF', cls: 't-pdf' },
-    excel: { exts: ['xlsx', 'xls', 'xlsm', 'csv', 'ods'], factory: ExcelEditor, badge: 'XLS', cls: 't-xls' },
-    word: { exts: ['docx', 'txt'], factory: WordEditor, badge: 'DOC', cls: 't-doc' },
-    ppt: { exts: ['pptx'], factory: PptEditor, badge: 'PPT', cls: 't-ppt' }
+    pdf: { factory: PdfEditor, cls: 't-pdf' },
+    excel: { factory: ExcelEditor, cls: 't-xls' },
+    word: { factory: WordEditor, cls: 't-doc' },
+    ppt: { factory: PptEditor, cls: 't-ppt' }
   };
-  const UNSUPPORTED = {
-    doc: 'Los archivos .doc antiguos no son compatibles. Ábrelo en Word y guárdalo como .docx.',
-    ppt: 'Los archivos .ppt antiguos no son compatibles. Guárdalo como .pptx.'
-  };
-  const kindOf = name => {
-    const ext = name.split('.').pop().toLowerCase();
-    return Object.keys(KINDS).find(k => KINDS[k].exts.includes(ext));
-  };
+  const TAG_CLASS = { pdf: 't-pdf', excel: 't-xls', word: 't-doc', ppt: 't-ppt', outline: 't-ppt', image: 't-pdf' };
+  const kindOf = name => Importers.kindOf(name);
+  const tagText = name => (Importers.extOf(name) || 'doc').slice(0, 4).toUpperCase();
 
   let editor = null, isDirty = false, baseName = '';
 
@@ -37,7 +32,7 @@
     $('#workspace').scrollTo(0, 0);
     const badge = $('#docBadge');
     badge.className = 'tag ' + k.cls;
-    badge.textContent = k.badge;
+    badge.textContent = tagText(name);
     baseName = name.replace(/\.[^.]+$/, '');
     $('#docName').value = baseName;
     show('editor');
@@ -56,12 +51,15 @@
       return;
     }
     loading(false);
+    mountPager();
   }
 
   function closeEditor() {
     if (editor) { try { editor.destroy(); } catch {} }
     editor = null;
     isDirty = false;
+    unmountPager();
+    $('#printRoot').innerHTML = '';
     $('#workspace').innerHTML = '';
     $('#workspace').style.overflow = '';
   }
@@ -76,16 +74,177 @@
     renderRecent();
   }
 
+  /** Abre bytes según el tipo de archivo (convierte imágenes a PDF, etc.) */
+  async function openData(name, data) {
+    const kind = kindOf(name);
+    if (!kind) {
+      const list = ['PDF', 'Word (.docx, .doc, .odt, .rtf)', 'Excel (.xlsx, .xls, .ods, .csv, .numbers)', 'PowerPoint (.pptx, .ppt, .odp)', 'imágenes', 'Markdown, HTML y archivos de texto'];
+      return UI.modal('Formato no compatible', 'Folio puede abrir: ' + list.join(', ') + '.');
+    }
+    if (kind === 'image') {
+      loading(true, 'Convirtiendo imagen…');
+      let pdf;
+      try { pdf = await Importers.imageToPdf(data, name); } catch (e) { loading(false); return UI.modal('No se pudo abrir', String(e.message || e)); }
+      loading(false);
+      await openEditor('pdf', pdf, name.replace(/\.[^.]+$/, '') + '.pdf');
+      toast('La imagen se abrió como PDF: puedes anotarla y guardarla.', 3500);
+      return;
+    }
+    await openEditor(kind === 'outline' ? 'word' : kind, data, name);
+  }
+
   async function openFile(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (UNSUPPORTED[ext]) return UI.modal('Formato no compatible', UNSUPPORTED[ext]);
-    const kind = kindOf(file.name);
-    if (!kind) return UI.modal('Formato no compatible', 'Puedes abrir archivos PDF, Excel (.xlsx, .xls, .csv), Word (.docx, .txt) y PowerPoint (.pptx).');
     loading(true, 'Leyendo archivo…');
     let data;
     try { data = await readFile(file); } finally { loading(false); }
     recent.add(file.name, data.slice(0));
-    await openEditor(kind, data, file.name);
+    await openData(file.name, data);
+  }
+
+  /* ----- Navegación de páginas: indicador, ir a página y miniaturas ----- */
+  let pagerRaf = 0, thumbsBuilt = -1, thumbObserver = null;
+  function mountPager() {
+    const P = editor && editor.pages;
+    $('#pager').hidden = !P;
+    if (!P) return;
+    $('#workspace').addEventListener('scroll', onWsScroll, { passive: true });
+    window.addEventListener('resize', onWsScroll);
+    updatePager();
+    setTimeout(updatePager, 600);
+  }
+  function unmountPager() {
+    $('#pager').hidden = true;
+    $('#workspace').removeEventListener('scroll', onWsScroll);
+    window.removeEventListener('resize', onWsScroll);
+    const t = $('#thumbs'); t.hidden = true; t.innerHTML = ''; thumbsBuilt = -1;
+    document.body.classList.remove('with-thumbs');
+    if (thumbObserver) { thumbObserver.disconnect(); thumbObserver = null; }
+  }
+  function onWsScroll() { cancelAnimationFrame(pagerRaf); pagerRaf = requestAnimationFrame(updatePager); }
+  function updatePager() {
+    const P = editor && editor.pages;
+    if (!P) return;
+    const n = P.count(), cur = Math.min(n - 1, P.current());
+    $('#pgNow').textContent = (P.approx ? '≈' : '') + (cur + 1);
+    $('#pgTotal').textContent = n;
+    $('#pager').querySelector('[data-dir="-1"]').disabled = cur <= 0;
+    $('#pager').querySelector('[data-dir="1"]').disabled = cur >= n - 1;
+    const wide = window.matchMedia('(min-width: 1024px)').matches;
+    if (P.thumb && wide) { if (thumbsBuilt !== n) buildThumbs($('#thumbs'), P, true); }
+    else if (thumbsBuilt !== -1) { $('#thumbs').hidden = true; $('#thumbs').innerHTML = ''; thumbsBuilt = -1; document.body.classList.remove('with-thumbs'); setTimeout(() => window.dispatchEvent(new Event('resize')), 0); }
+    $('#thumbs').querySelectorAll('.thumb').forEach((t, i) => t.classList.toggle('on', i === cur));
+    const on = $('#thumbs').querySelector('.thumb.on');
+    if (on && !$('#thumbs').hidden) {
+      const tr = $('#thumbs').getBoundingClientRect(), r = on.getBoundingClientRect();
+      if (r.top < tr.top || r.bottom > tr.bottom) on.scrollIntoView({ block: 'nearest' });
+    }
+  }
+  function buildThumbs(container, P, sidebar, onPick) {
+    const n = P.count();
+    container.innerHTML = '';
+    const width = sidebar ? 132 : Math.min(150, Math.floor((Math.min(window.innerWidth, 520) - 70) / 2));
+    const obs = new IntersectionObserver(entries => {
+      for (const en of entries) {
+        if (!en.isIntersecting || en.target._done) continue;
+        en.target._done = true;
+        const box = en.target.querySelector('.thumb-img');
+        P.thumb(+en.target.dataset.i, width).then(node => { box.innerHTML = ''; box.append(node); }).catch(() => {});
+      }
+    }, { root: container, rootMargin: '300px 0px' });
+    for (let i = 0; i < n; i++) {
+      const t = el('button', { class: 'thumb', 'data-i': i, 'aria-label': `${P.label} ${i + 1}` },
+        el('span', { class: 'thumb-img', style: { width: width + 'px' } }), el('span', { class: 'thumb-n' }, String(i + 1)));
+      t.addEventListener('click', () => { P.goTo(i); if (onPick) onPick(); });
+      container.append(t);
+      obs.observe(t);
+    }
+    if (sidebar) {
+      container.hidden = false;
+      document.body.classList.add('with-thumbs');
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 0);   // reajustar páginas al nuevo ancho
+      thumbsBuilt = n;
+      if (thumbObserver) thumbObserver.disconnect();
+      thumbObserver = obs;
+    }
+    return obs;
+  }
+  async function openPageSheet() {
+    const P = editor && editor.pages;
+    if (!P) return;
+    const n = P.count(), cur = P.current();
+    const input = el('input', { type: 'number', min: 1, max: n, value: cur + 1, inputmode: 'numeric', 'aria-label': 'Número' });
+    const go = () => { const v = Math.max(1, Math.min(n, parseInt(input.value) || 1)); P.goTo(v - 1); UI.closeModal(); };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    const row = el('div', { class: 'goto-row' }, input, el('span', { class: 'goto-of' }, `de ${n}${P.approx ? ' (aprox.)' : ''}`), el('button', { class: 'btn primary', onclick: go }, 'Ir'));
+    const body = el('div', { class: 'page-sheet' }, row);
+    let obs = null;
+    if (P.thumb) {
+      const grid = el('div', { class: 'thumb-grid' });
+      body.append(grid);
+      setTimeout(() => {
+        obs = buildThumbs(grid, P, false, () => UI.closeModal());
+        const curT = grid.children[cur];
+        if (curT) { curT.classList.add('on'); curT.scrollIntoView({ block: 'center' }); }
+      }, 30);
+    }
+    if (P.outline) {
+      const items = P.outline();
+      if (items.length) {
+        body.append(el('label', {}, 'Títulos del documento'));
+        const list = el('div', { class: 'outline' });
+        for (const it of items) list.append(el('button', { class: 'outline-item lv' + it.level, onclick: () => { it.go(); UI.closeModal(); } }, it.text));
+        body.append(list);
+      }
+    }
+    await UI.modal(`Ir a ${P.label.toLowerCase()}`, body, [{ label: 'Cerrar', value: null }]);
+    if (obs) obs.disconnect();
+  }
+
+  /* ----- Imprimir / exportar a PDF ----- */
+  async function printDoc(asPdf) {
+    if (!editor) return;
+    if (asPdf && editor.kind === 'pdf') return onSave();
+    if (!editor.printable) return toast('Este documento no se puede imprimir');
+    loading(true, 'Preparando…');
+    try {
+      const { node, page } = await editor.printable();
+      const root = $('#printRoot');
+      root.innerHTML = '';
+      root.append(node);
+      let st = document.getElementById('printPageStyle');
+      if (!st) { st = el('style', { id: 'printPageStyle' }); document.head.append(st); }
+      st.textContent = '@media print {' + page + '}';
+      await Promise.all([...root.querySelectorAll('img')].map(i => (i.complete ? null : new Promise(r => { i.onload = i.onerror = r; }))));
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    } catch (e) {
+      loading(false);
+      return UI.modal('No se pudo preparar', String(e.message || e));
+    }
+    loading(false);
+    const title = $('#docName').value.trim() || 'Documento';
+    if (asPdf) toast('En «Destino» o «Impresora» elige «Guardar como PDF».', 5000);
+    const prevTitle = document.title;
+    document.title = title;            // nombre sugerido del PDF
+    setTimeout(() => {
+      if (UI.android && window.FolioAndroid.print) window.FolioAndroid.print(title);
+      else window.print();
+      setTimeout(() => { document.title = prevTitle; }, 1500);
+    }, asPdf ? 900 : 50);
+  }
+  window.addEventListener('afterprint', () => { if (!UI.android) setTimeout(() => { $('#printRoot').innerHTML = ''; }, 500); });
+
+  async function onMore() {
+    if (!editor) return;
+    const opts = [];
+    if (editor.pages) opts.push({ label: `Ir a ${editor.pages.label.toLowerCase()}…`, value: 'goto', icon: 'pages' });
+    opts.push({ label: 'Imprimir', value: 'print', icon: 'printer' });
+    opts.push({ label: 'Exportar como PDF', value: 'pdf', icon: 'filePdf' });
+    opts.push({ label: 'Compartir', value: 'share', icon: 'share' });
+    const v = await choose('Opciones', opts);
+    if (v === 'goto') openPageSheet();
+    else if (v === 'print') printDoc(false);
+    else if (v === 'pdf') printDoc(true);
+    else if (v === 'share') onShare();
   }
 
   async function produce(fmt) {
@@ -140,14 +299,13 @@
     for (const it of items) {
       const kind = kindOf(it.name);
       if (!kind) continue;
-      const k = KINDS[kind];
       const li = el('li', {},
-        el('span', { class: 'tag ' + k.cls }, k.badge),
+        el('span', { class: 'tag ' + TAG_CLASS[kind] }, tagText(it.name)),
         el('div', { class: 'meta' }, el('b', {}, it.name), el('small', {}, fmtDate(it.time) + ' · ' + fmtSize(it.size))),
         el('button', { 'aria-label': 'Quitar de recientes', onclick: async e => { e.stopPropagation(); await recent.remove(it.name); renderRecent(); } }, UI.icon('x', 16)));
       li.addEventListener('click', async () => {
         await recent.add(it.name, it.bytes.slice(0));
-        openEditor(kind, it.bytes.slice(0), it.name);
+        openData(it.name, it.bytes.slice(0));
       });
       ul.append(li);
     }
@@ -169,6 +327,20 @@
   window.addEventListener('popstate', () => { if (editor) goHome(); });
   $('#btnSave').addEventListener('click', onSave);
   $('#btnShare').addEventListener('click', onShare);
+  $('#btnMore').addEventListener('click', onMore);
+  $('#pager').querySelectorAll('.pg-btn').forEach(b => b.addEventListener('click', () => {
+    const P = editor && editor.pages; if (!P) return;
+    P.goTo(P.current() + +b.dataset.dir);
+  }));
+  $('#pager .pg-count').addEventListener('click', openPageSheet);
+  // Atajos de teclado (tablets con teclado / computadora)
+  document.addEventListener('keydown', e => {
+    if (!editor) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); onSave(); }
+    else if (mod && e.key.toLowerCase() === 'p') { e.preventDefault(); printDoc(false); }
+    else if (mod && e.key.toLowerCase() === 'g' && editor.pages) { e.preventDefault(); openPageSheet(); }
+  });
   window.addEventListener('beforeunload', e => { if (editor && isDirty) { e.preventDefault(); e.returnValue = ''; } });
 
   // Arrastrar y soltar (tablets / escritorio)
@@ -201,5 +373,8 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
-  window.LizApp = { openFile, openEditor };
+  // Selector de archivos: todas las extensiones compatibles
+  $('#fileInput').setAttribute('accept', Importers.allExtensions().map(e => '.' + e).join(','));
+
+  window.LizApp = { openFile, openEditor, openData };
 })();

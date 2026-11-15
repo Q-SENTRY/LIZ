@@ -551,6 +551,19 @@ const ExcelEditor = (() => {
         else if (e.key === 'Escape') { input.value = input.dataset.orig; input.blur(); }
       });
       input.addEventListener('blur', () => { if (commit()) refreshCells(); });
+      refBox.setAttribute('role', 'button');
+      refBox.title = 'Ir a celda';
+      refBox.addEventListener('click', async () => {
+        const v = await prompt('Ir a celda', addr(sel.r, sel.c), { label: 'Ejemplo: B20 o Hoja2!A1' });
+        if (!v) return;
+        let [sh, ref] = v.includes('!') ? v.split('!') : [null, v];
+        if (sh) { const i = wb.SheetNames.findIndex(n => n.toLowerCase() === sh.replace(/'/g, '').toLowerCase()); if (i < 0) return toast('No existe esa hoja'); if (i !== sheetIdx) switchSheet(i); }
+        if (!/^[A-Za-z]{1,3}\d+$/.test(ref.trim())) return toast('Escribe una celda como B20');
+        const a = XLSX.utils.decode_cell(ref.trim().toUpperCase());
+        if (a.r >= dims().rows) { ws()._extraRows = a.r + 20; render(); }
+        if (a.c >= dims().cols) { ws()._extraCols = a.c + 5; render(); }
+        select(a.r, a.c);
+      });
       const ok = el('button', { class: 'xl-ok', 'aria-label': 'Confirmar', onclick: () => { commit(); refreshCells(); select(Math.min(sel.r + 1, dims().rows - 1), sel.c); } }, UI.icon('check', 18));
       table = el('table', { class: 'xl' });
       table.addEventListener('click', e => {
@@ -579,7 +592,8 @@ const ExcelEditor = (() => {
       }
       if (!wb.SheetNames.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[]]), 'Hoja1');
       calibrate();
-      api.ext = srcExt === 'csv' ? 'csv' : srcExt === 'ods' ? 'ods' : 'xlsx';
+      api.ext = ['csv', 'prn'].includes(srcExt) ? 'csv' : ['tsv', 'tab'].includes(srcExt) ? 'tsv' : ['ods', 'fods', 'ots'].includes(srcExt) ? 'ods' : 'xlsx';
+      if (api.ext === 'tsv') api.formats = [{ label: 'Texto separado por tabulaciones (.tsv)', value: 'tsv' }, ...api.formats];
       buildToolbar();
       buildUI();
       render();
@@ -588,6 +602,7 @@ const ExcelEditor = (() => {
     async function save(fmt) {
       commit();
       const type = fmt || api.ext;
+      if (type === 'tsv') return new Blob([XLSX.utils.sheet_to_csv(ws(), { FS: '\t' })], { type: 'text/tab-separated-values;charset=utf-8' });
       if (type === 'csv') {
         const csv = XLSX.utils.sheet_to_csv(ws());
         return new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
@@ -609,7 +624,33 @@ const ExcelEditor = (() => {
       return new Blob([out], { type: type === 'ods' ? 'application/vnd.oasis.opendocument.spreadsheet' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     }
 
+    /** Imprime la hoja actual (solo el rango con datos) */
+    async function printable() {
+      commit();
+      const s = ws(), ref = s['!ref'];
+      const rg = ref ? XLSX.utils.decode_range(ref) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+      rg.e.r = Math.min(rg.e.r, rg.s.r + 5000);
+      const merges = (s['!merges'] || []);
+      const covered = new Set();
+      merges.forEach(m => { for (let r = m.s.r; r <= m.e.r; r++) for (let c = m.s.c; c <= m.e.c; c++) if (r !== m.s.r || c !== m.s.c) covered.add(r + ':' + c); });
+      const esc = t => String(t).replace(/[&<>]/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[x]));
+      let h = `<h1>${esc(wb.SheetNames[sheetIdx])}</h1><table><tbody>`;
+      for (let r = rg.s.r; r <= rg.e.r; r++) {
+        h += '<tr>';
+        for (let c = rg.s.c; c <= rg.e.c; c++) {
+          if (covered.has(r + ':' + c)) continue;
+          const cell = s[addr(r, c)], m = merges.find(x => x.s.r === r && x.s.c === c);
+          const span = m ? ` colspan="${m.e.c - m.s.c + 1}" rowspan="${m.e.r - m.s.r + 1}"` : '';
+          h += `<td${span}${cell && cell.t === 'n' ? ' class="num"' : ''}>${esc(cellText(cell))}</td>`;
+        }
+        h += '</tr>';
+      }
+      const wide = rg.e.c - rg.s.c > 5;
+      return { node: el('div', { class: 'print-xls', html: h + '</tbody></table>' }), page: `@page { size: ${wide ? 'letter landscape' : 'letter'}; margin: 1.2cm; }` };
+    }
+
     const api = {
+      printable,
       open, save, destroy() { ctx.workspace.style.overflow = ''; }, ext: 'xlsx', kind: 'excel',
       formats: [{ label: 'Excel (.xlsx)', value: 'xlsx' }, { label: 'CSV de la hoja actual (.csv)', value: 'csv' }, { label: 'OpenDocument (.ods)', value: 'ods' }]
     };

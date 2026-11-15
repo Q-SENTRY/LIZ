@@ -449,7 +449,7 @@ const WordEditor = (() => {
 
   /* ---------- Editor ---------- */
   function create(ctx) {
-    let page, base = null;
+    let page, base = null, srcExt = 'docx';
 
     const cmd = (c, v = null) => { page.focus(); document.execCommand(c, false, v); ctx.dirty(); updateState(); };
 
@@ -539,11 +539,10 @@ const WordEditor = (() => {
       page = el('div', { class: 'word-page', contenteditable: 'true', spellcheck: 'true' });
       ctx.workspace.append(el('div', { class: 'word-scroll' }, page));
       const ext = name.split('.').pop().toLowerCase();
+      srcExt = ext;
+      api.ext = 'docx';
       if (!data) page.innerHTML = '<p><br></p>';
-      else if (ext === 'txt') {
-        const text = new TextDecoder().decode(data);
-        page.innerHTML = text.split(/\r?\n/).map(l => `<p>${UI.xmlEsc(l) || '<br>'}</p>`).join('');
-      } else {
+      else if (['docx', 'docm', 'dotx', 'dotm'].includes(ext)) {
         const res = await mammoth.convertToHtml({ arrayBuffer: data }, {
           styleMap: ['u => u', 'strike => s', 'highlight => mark', "p[style-name='Title'] => h1.doc-title:fresh", "p[style-name='Subtitle'] => h2.doc-subtitle:fresh"],
           includeDefaultStyleMap: true
@@ -551,20 +550,36 @@ const WordEditor = (() => {
         page.innerHTML = res.value || '<p><br></p>';
         try { await enrichFromDocx(page, data); } catch (e) { console.warn('formato extra no disponible', e); }
         try { base = await JSZip.loadAsync(data); } catch { base = null; }
-        const lost = res.messages.filter(m => m.type === 'warning').length;
-        if (lost) console.info('mammoth:', res.messages);
+        if (ext !== 'docx') {
+          // macros / plantillas: se guarda con la misma extensión (conserva macros); .docx genera un archivo limpio
+          api.ext = ext;
+          api.formats = [{ label: `Word (.${ext})`, value: ext }, { label: 'Word sin macros (.docx)', value: 'docx' }, ...api.formats.slice(1)];
+        }
+      } else {
+        const r = await Importers.toDocument(data, name);
+        page.innerHTML = r.html;
+        api.ext = r.saveExt;
+        api.formats = r.formats;
+        if (r.code) page.classList.add('plain');
+        if (r.note) setTimeout(() => UI.toast(r.note, 5000), 400);
       }
       try { document.execCommand('styleWithCSS', false, false); } catch {}
       page.addEventListener('input', () => ctx.dirty());
       document.addEventListener('selectionchange', onSel);
+      measure();
+      page.addEventListener('input', scheduleMeasure);
+      window.addEventListener('resize', markPages);
       if (!data) setTimeout(() => page.focus(), 100);
-      api.ext = 'docx';
     }
     function onSel() { if (page && page.contains(getSelection().anchorNode)) { saveSel(); updateState(); } }
 
+    const plainText = () => [...page.children].map(n => n.innerText.replace(/\u00a0/g, ' ')).join('\n');
     async function save(fmt) {
-      if (fmt === 'txt') return new Blob([page.innerText], { type: 'text/plain;charset=utf-8' });
-      if (fmt === 'html') return new Blob([`<!doctype html><meta charset="utf-8"><body>${page.innerHTML}</body>`], { type: 'text/html' });
+      fmt = fmt || api.ext;
+      if (fmt === 'html') return new Blob([`<!doctype html>\n<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${UI.xmlEsc(document.getElementById('docName').value || 'Documento')}</title></head><body>${page.innerHTML}</body></html>`], { type: 'text/html' });
+      if (fmt === 'md') return new Blob([Importers.htmlToMarkdown(page)], { type: 'text/markdown;charset=utf-8' });
+      if (Importers.TEXT_EXTS.includes(fmt)) return new Blob([page.classList.contains('plain') ? plainText() : page.innerText], { type: 'text/plain;charset=utf-8' });
+      if (fmt === 'docx' && srcExt !== 'docx') return htmlToDocx(page);
       // Si el documento vino de un .docx se reutiliza el original (encabezados, pies, márgenes, estilos)
       if (base) {
         try { return await htmlToDocx(page, await JSZip.loadAsync(await base.generateAsync({ type: 'uint8array' }))); }
@@ -573,9 +588,45 @@ const WordEditor = (() => {
       return htmlToDocx(page);
     }
 
+    /* ----- Páginas aproximadas (hoja Carta, márgenes de 1", letra de 11 pt) e índice de títulos ----- */
+    let estPages = 1, measureTimer = 0;
+    function measure() {
+      if (!page) return;
+      const m = el('div', { class: 'word-page word-measure' + (page.classList.contains('plain') ? ' plain' : ''), html: page.innerHTML });
+      document.body.append(m);
+      const contentH = m.scrollHeight - 192;
+      m.remove();
+      estPages = Math.max(1, Math.ceil((contentH - 4) / 864));
+      markPages();
+    }
+    const pageH = () => page.scrollHeight / estPages;
+    function markPages() { if (page) page.style.setProperty('--pg', pageH() + 'px'); }
+    function scheduleMeasure() { clearTimeout(measureTimer); measureTimer = setTimeout(measure, 700); }
+    const pagesApi = {
+      label: 'Página', approx: true,
+      count: () => estPages,
+      current() {
+        const ws = ctx.workspace;
+        const y = ws.scrollTop - page.offsetTop + ws.clientHeight * 0.35;
+        return Math.max(0, Math.min(this.count() - 1, Math.floor(y / pageH())));
+      },
+      goTo(i) { ctx.workspace.scrollTo({ top: page.offsetTop + i * pageH() - 8, behavior: 'smooth' }); },
+      outline() {
+        return [...page.querySelectorAll('h1, h2, h3')].filter(h => h.textContent.trim()).map(h => ({
+          level: +h.tagName[1], text: h.textContent.trim().slice(0, 80),
+          go: () => ctx.workspace.scrollTo({ top: h.offsetTop + page.offsetTop - 16, behavior: 'smooth' })
+        }));
+      }
+    };
+    async function printable() {
+      const node = el('div', { class: 'print-word' + (page.classList.contains('plain') ? ' plain' : ''), html: page.innerHTML });
+      return { node, page: '@page { size: letter; margin: 2cm 2.2cm; }' };
+    }
+
     const api = {
+      pages: pagesApi, printable,
       open, save, ext: 'docx', kind: 'word',
-      destroy() { document.removeEventListener('selectionchange', onSel); },
+      destroy() { document.removeEventListener('selectionchange', onSel); window.removeEventListener('resize', markPages); },
       formats: [{ label: 'Word (.docx)', value: 'docx' }, { label: 'Texto (.txt)', value: 'txt' }, { label: 'Página web (.html)', value: 'html' }]
     };
     return api;

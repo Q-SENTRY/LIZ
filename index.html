@@ -26,26 +26,34 @@
       <span class="edition">Documentos</span>
     </header>
 
-    <h1 class="hero">Tus documentos,<br><em>en orden.</em></h1>
+    <div class="home-grid">
+      <div class="home-main">
+        <h1 class="hero">Tus documentos,<br><em>en orden.</em></h1>
 
-    <button id="btnOpen" class="open-big">
-      <span class="open-ic" data-icon="open"></span>
-      <span class="open-txt"><b>Abrir documento</b><small>PDF, Excel, Word o PowerPoint</small></span>
-      <span class="open-arrow" data-icon="chevron"></span>
-    </button>
-    <input type="file" id="fileInput" hidden
-      accept=".pdf,.xlsx,.xls,.xlsm,.csv,.ods,.docx,.txt,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+        <button id="btnOpen" class="open-big">
+          <span class="open-ic" data-icon="open"></span>
+          <span class="open-txt"><b>Abrir documento</b><small>Documentos, hojas de cálculo, presentaciones e imágenes</small></span>
+          <span class="open-arrow" data-icon="chevron"></span>
+        </button>
+        <p class="formats">PDF · DOCX · DOC · ODT · RTF · XLSX · XLS · ODS · CSV · NUMBERS · PPTX · PPT · ODP · MD · HTML · TXT · JPG · PNG</p>
+        <input type="file" id="fileInput" hidden
+          accept=".pdf,.xlsx,.xls,.xlsm,.csv,.ods,.docx,.txt,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/vnd.openxmlformats-officedocument.presentationml.presentation">
 
-    <h2 class="sec-title">Crear</h2>
-    <div class="new-grid">
-      <button class="new-card" data-new="word"><span class="tag t-doc">DOC</span><span class="new-name">Documento</span></button>
-      <button class="new-card" data-new="excel"><span class="tag t-xls">XLS</span><span class="new-name">Hoja de cálculo</span></button>
-      <button class="new-card" data-new="ppt"><span class="tag t-ppt">PPT</span><span class="new-name">Presentación</span></button>
+      </div>
+      <div class="home-side">
+        <h2 class="sec-title">Crear</h2>
+        <div class="new-grid">
+          <button class="new-card" data-new="word"><span class="tag t-doc">DOC</span><span class="new-name">Documento</span></button>
+          <button class="new-card" data-new="excel"><span class="tag t-xls">XLS</span><span class="new-name">Hoja de cálculo</span></button>
+          <button class="new-card" data-new="ppt"><span class="tag t-ppt">PPT</span><span class="new-name">Presentación</span></button>
+        </div>
+
+        <h2 class="sec-title">Recientes</h2>
+        <ul id="recentList" class="recent"></ul>
+        <p id="recentEmpty" class="empty">Aún no has abierto documentos.</p>
+
+      </div>
     </div>
-
-    <h2 class="sec-title">Recientes</h2>
-    <ul id="recentList" class="recent"></ul>
-    <p id="recentEmpty" class="empty">Aún no has abierto documentos.</p>
 
     <p class="foot"><span data-icon="lock"></span>Todo se procesa en tu dispositivo. Nada se sube a internet.</p>
   </div>
@@ -58,11 +66,21 @@
     <span id="docBadge" class="tag"></span>
     <input id="docName" class="doc-name" spellcheck="false" aria-label="Nombre del archivo">
     <button id="btnShare" class="icon-btn" aria-label="Compartir" title="Compartir" data-icon="share"></button>
+    <button id="btnMore" class="icon-btn" aria-label="Más opciones" title="Más opciones" data-icon="more"></button>
     <button id="btnSave" class="save-btn">Guardar</button>
   </header>
   <div id="toolbar" class="toolbar"></div>
-  <main id="workspace" class="workspace"></main>
+  <div class="editor-body">
+    <aside id="thumbs" class="thumbs" hidden aria-label="Páginas"></aside>
+    <main id="workspace" class="workspace"></main>
+  </div>
+  <div id="pager" class="pager" hidden>
+    <button class="pg-btn" data-dir="-1" aria-label="Página anterior" data-icon="back"></button>
+    <button class="pg-count" aria-label="Ir a página"><span id="pgNow">1</span><span class="pg-of">/</span><span id="pgTotal">1</span></button>
+    <button class="pg-btn" data-dir="1" aria-label="Página siguiente" data-icon="chevron"></button>
+  </div>
 </section>
+<div id="printRoot" aria-hidden="true"></div>
 
 <!-- ========== MODAL / TOAST ========== -->
 <div id="modal" class="modal" hidden>
@@ -82,6 +100,7 @@
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/mammoth.browser.min.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/importers.js"></script>
 <script src="js/pdf-editor.js"></script>
 <script src="js/excel-editor.js"></script>
 <script src="js/word-editor.js"></script>

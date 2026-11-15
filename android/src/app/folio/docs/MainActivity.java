@@ -261,15 +261,8 @@ public class MainActivity extends Activity {
             i.addCategory(Intent.CATEGORY_OPENABLE);
             boolean images = !mimes.isEmpty();
             for (String m : mimes) if (!m.startsWith("image/")) images = false;
-            if (images) i.setType("image/*");
-            else {
-                i.setType("*/*");
-                if (!mimes.isEmpty()) {
-                    mimes.add("application/octet-stream");
-                    mimes.add("application/zip");
-                    i.putExtra(Intent.EXTRA_MIME_TYPES, mimes.toArray(new String[0]));
-                }
-            }
+            // Folio reconoce los archivos por su extensión: se muestran todos para no ocultar formatos poco comunes
+            i.setType(images ? "image/*" : "*/*");
             try {
                 startActivityForResult(i, REQ_PICK);
             } catch (ActivityNotFoundException e) {
@@ -369,7 +362,21 @@ public class MainActivity extends Activity {
             }
         }
 
+        /** Abre el diálogo de impresión de Android (incluye "Guardar como PDF") */
         @JavascriptInterface
-        public String version() { return "1"; }
+        public void print(final String name) {
+            main.post(new Runnable() { public void run() {
+                try {
+                    android.print.PrintManager pm = (android.print.PrintManager) getSystemService(PRINT_SERVICE);
+                    String job = (name == null || name.isEmpty()) ? "Folio" : name;
+                    pm.print(job, web.createPrintDocumentAdapter(job), new android.print.PrintAttributes.Builder().build());
+                } catch (Exception e) {
+                    toast("No se pudo imprimir");
+                }
+            } });
+        }
+
+        @JavascriptInterface
+        public String version() { return "2"; }
     }
 }

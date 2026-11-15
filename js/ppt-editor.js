@@ -684,7 +684,9 @@ const PptEditor = (() => {
     /* ---------- Escalado y navegación ---------- */
     function fit() {
       const avail = Math.max(200, ctx.workspace.clientWidth - 20);
-      const w = Math.min(avail, 1100);
+      // la diapositiva completa debe caber en pantalla (importante en celular horizontal)
+      const availH = Math.max(160, ctx.workspace.clientHeight - 70);
+      const w = Math.min(avail, 1100, availH * slideW / slideH);
       const s = w / DESIGN_W;
       for (const sl of slides) {
         const h = sl.dom;
@@ -987,7 +989,9 @@ const PptEditor = (() => {
     }
 
     /* ---------- Abrir / guardar ---------- */
-    async function open(data) {
+    async function open(data, name) {
+      const e = name ? name.split('.').pop().toLowerCase() : 'pptx';
+      if (['pptm', 'ppsx', 'ppsm', 'potx', 'potm'].includes(e)) api.ext = e;   // conserva tipo (macros, presentación, plantilla)
       if (!data) data = await (await fetch('assets/blank.pptx')).arrayBuffer();
       zip = await JSZip.loadAsync(data);
       const rootRels = parseXml(await zip.file('_rels/.rels').async('string'));
@@ -1051,7 +1055,53 @@ const PptEditor = (() => {
       blobUrls.forEach(u => URL.revokeObjectURL(u));
     }
 
-    const api = { open, save, destroy, ext: 'pptx', kind: 'ppt' };
+    /* ----- Navegación de diapositivas ----- */
+    const pagesApi = {
+      label: 'Diapositiva',
+      count: () => slides.length,
+      current() {
+        const best = UI.visiblePage(slides.map(sl => sl.dom), ctx.workspace, pagesApi);
+        if (best !== current) setCurrent(best);
+        return best;
+      },
+      goTo(i) {
+        i = Math.max(0, Math.min(slides.length - 1, i));
+        pagesApi.target = i; pagesApi._settling = true; clearTimeout(pagesApi._t); pagesApi._t = setTimeout(() => { pagesApi._settling = false; }, 900);
+        setCurrent(i);
+        ctx.workspace.scrollTo({ top: slides[i].dom.offsetTop - 12, behavior: 'smooth' });
+      },
+      async thumb(i, width) {
+        const src = slides[i].dom._root;
+        const clone = src.cloneNode(true);
+        clone.classList.remove('current');
+        clone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+        const sc = width / DESIGN_W;
+        clone.style.transform = `scale(${sc})`;
+        clone.style.boxShadow = 'none';
+        return el('div', { class: 'thumb-slide', style: { width: width + 'px', height: slideH * k * sc + 'px' } }, clone);
+      }
+    };
+
+    /** Contenido para imprimir: una diapositiva por hoja, a página completa */
+    async function printable() {
+      syncText();
+      const wIn = 11, hIn = +(wIn * slideH / slideW).toFixed(3);
+      const sc = (wIn * 96) / DESIGN_W;
+      const root = el('div', { class: 'print-ppt' });
+      for (const sl of slides) {
+        const clone = sl.dom._root.cloneNode(true);
+        clone.classList.remove('current');
+        clone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+        clone.querySelectorAll('.picked').forEach(n => n.classList.remove('picked'));
+        clone.style.transform = `scale(${sc})`;
+        clone.style.boxShadow = 'none';
+        clone.style.borderRadius = '0';
+        root.append(el('div', { class: 'print-slide', style: { width: wIn + 'in', height: (hIn - 0.01) + 'in' } }, clone));
+      }
+      return { node: root, page: `@page { size: ${wIn}in ${hIn}in; margin: 0; }` };
+    }
+
+    const api = { open, save, destroy, ext: 'pptx', kind: 'ppt', pages: pagesApi, printable };
     return api;
   }
   return { create };

@@ -34,6 +34,9 @@ const UI = (() => {
    * Muestra un diálogo. buttons: [{label, value, primary, danger}]
    * body: Node o string. Devuelve una promesa con el value del botón (o null).
    */
+  let activeClose = null;
+  /** Cierra el diálogo abierto (si lo hay) devolviendo un valor */
+  function closeModal(v = null) { if (activeClose) activeClose(v); }
   function modal(title, body, buttons = [{ label: 'Aceptar', value: true, primary: true }]) {
     return new Promise(resolve => {
       const m = $('#modal');
@@ -43,7 +46,8 @@ const UI = (() => {
       if (typeof body === 'string') b.append(el('p', {}, body)); else if (body) b.append(body);
       const a = $('#modalActions');
       a.innerHTML = '';
-      const close = v => { m.hidden = true; m.onclick = null; resolve(v); };
+      const close = v => { m.hidden = true; m.onclick = null; activeClose = null; resolve(v); };
+      activeClose = close;
       for (const btn of buttons) {
         a.append(el('button', {
           class: 'btn' + (btn.primary ? ' primary' : '') + (btn.danger ? ' danger' : ''),
@@ -221,7 +225,10 @@ const UI = (() => {
     more: '<circle cx="5.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
     textbox: P('M4 4h16v16H4z M8.5 9h7 M12 9v7'),
     file: P('M13.5 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8.5z M13.5 3v5.5H19'),
-    download: P('M12 4v11 M7.5 10.5L12 15l4.5-4.5 M5 19h14')
+    download: P('M12 4v11 M7.5 10.5L12 15l4.5-4.5 M5 19h14'),
+    printer: P('M7 8V3.5h10V8 M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2 M7 14h10v6.5H7z M17.5 11h.01'),
+    pages: P('M8 3.5h9.5A1.5 1.5 0 0 1 19 5v12.5 M5 7.5A1.5 1.5 0 0 1 6.5 6H14a1.5 1.5 0 0 1 1.5 1.5v12A1.5 1.5 0 0 1 14 21H6.5A1.5 1.5 0 0 1 5 19.5z'),
+    filePdf: P('M13.5 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8.5z M13.5 3v5.5H19 M8.5 13.5h7 M8.5 17h4.5')
   };
   function icon(name, size = 20) {
     const span = document.createElement('span');
@@ -229,10 +236,32 @@ const UI = (() => {
     span.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
     return span;
   }
+  /**
+   * Página "actual" dentro de un contenedor con scroll: la que se acaba de elegir (si sigue visible),
+   * la primera al inicio, la última al final y, si no, la que ocupa más pantalla.
+   */
+  function visiblePage(els, container, state) {
+    if (!els.length) return 0;
+    const cr = container.getBoundingClientRect();
+    const vis = els.map(e => { const r = e.getBoundingClientRect(); const v = Math.max(0, Math.min(r.bottom, cr.bottom) - Math.max(r.top, cr.top)); return { v, ratio: r.height ? v / r.height : 0 }; });
+    if (state && state.target != null) {
+      // mientras se desplaza hacia la página elegida, o mientras se vea bien, se mantiene
+      if (state._settling || (vis[state.target] && vis[state.target].ratio > 0.5)) return state.target;
+      state.target = null;
+    }
+    if (container.scrollTop <= 2) return 0;
+    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 2) {
+      for (let i = els.length - 1; i >= 0; i--) if (vis[i].ratio > 0.5) return i;
+    }
+    let best = 0;
+    vis.forEach((x, i) => { if (x.v > vis[best].v + 1) best = i; });
+    return best;
+  }
+
   /** Botón de barra de herramientas: ícono + etiqueta opcional */
   function tbBtn(iconName, title, onclick, { label = '', attrs = {} } = {}) {
     return el('button', { class: 'tb' + (label ? ' tb-l' : ''), title, 'aria-label': title, onclick, ...attrs }, icon(iconName), label ? el('span', {}, label) : null);
   }
 
-  return { android, icon, tbBtn, $, el, toast, loading, modal, prompt, confirm, choose, download, share, xmlEsc, readFile, recent };
+  return { visiblePage, closeModal, android, icon, tbBtn, $, el, toast, loading, modal, prompt, confirm, choose, download, share, xmlEsc, readFile, recent };
 })();

@@ -43,7 +43,8 @@ const PdfEditor = (() => {
     }
 
     function scaleFor(p) {
-      const avail = Math.max(200, ctx.workspace.clientWidth - 16);
+      // en pantallas grandes la página no pasa de ~900 px para que se lea cómoda
+      const avail = Math.min(900, Math.max(200, ctx.workspace.clientWidth - 24));
       // cada página se ajusta a su propio ancho (las horizontales y giradas también caben en pantalla)
       const w = p.page.getViewport({ scale: 1, rotation: (p.page.rotate + p.extraRot) % 360 }).width || baseWidth;
       return (avail / w) * zoom;
@@ -363,7 +364,64 @@ const PdfEditor = (() => {
       pdf && pdf.destroy();
     }
 
-    const api = { open, save, destroy, ext: 'pdf', kind: 'pdf' };
+    /* ----- Navegación de páginas ----- */
+    const pagesApi = {
+      label: 'Página',
+      count: () => pages.length,
+      current() { return UI.visiblePage(pages.map(p => p.wrap), ctx.workspace, pagesApi); },
+      goTo(i) {
+        i = Math.max(0, Math.min(pages.length - 1, i));
+        const p = pages[i];
+        if (!p) return;
+        pagesApi.target = i; pagesApi._settling = true; clearTimeout(pagesApi._t); pagesApi._t = setTimeout(() => { pagesApi._settling = false; }, 900);
+        ctx.workspace.scrollTo({ top: p.wrap.offsetTop - 12, behavior: 'smooth' });
+      },
+      async thumb(i, width) {
+        const p = pages[i];
+        const vp1 = p.page.getViewport({ scale: 1, rotation: (p.page.rotate + p.extraRot) % 360 });
+        const k = (width * Math.min(2, window.devicePixelRatio || 1)) / vp1.width;
+        const vp = p.page.getViewport({ scale: k, rotation: (p.page.rotate + p.extraRot) % 360 });
+        const c = el('canvas', { width: Math.ceil(vp.width), height: Math.ceil(vp.height) });
+        await p.page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        if (p.anns.length) {
+          // anotaciones encima de la miniatura
+          const svg = p.svg.cloneNode(true);
+          svg.setAttribute('width', c.width); svg.setAttribute('height', c.height);
+          const img = new Image();
+          await new Promise(r => { img.onload = r; img.onerror = r; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg)); });
+          try { c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); } catch {}
+        }
+        if (p.deleted) c.style.opacity = '.3';
+        return c;
+      }
+    };
+
+    /** Contenido para imprimir: cada página como imagen nítida con sus anotaciones, a su tamaño original */
+    async function printable() {
+      const root = el('div', { class: 'print-pdf' });
+      const sizes = new Map();
+      let css = '';
+      for (const p of pages) {
+        if (p.deleted) continue;
+        const rot = (p.page.rotate + p.extraRot) % 360;
+        const vp1 = p.page.getViewport({ scale: 1, rotation: rot });
+        const wIn = +(vp1.width / 72).toFixed(3), hIn = +(vp1.height / 72).toFixed(3);
+        const key = wIn + 'x' + hIn;
+        if (!sizes.has(key)) { const name = 'pdfp' + sizes.size; sizes.set(key, name); css += `@page ${name} { size: ${wIn}in ${hIn}in; margin: 0; }`; }
+        const k = Math.min(2.5, Math.sqrt(14e6 / (vp1.width * vp1.height)));
+        const vp = p.page.getViewport({ scale: k, rotation: rot });
+        const c = el('canvas', { width: Math.ceil(vp.width), height: Math.ceil(vp.height) });
+        const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+        await p.page.render({ canvasContext: g, viewport: vp }).promise;
+        const svg = p.svg.cloneNode(true);
+        const box = { width: wIn + 'in', height: (hIn - 0.01) + 'in' };
+        root.append(el('div', { class: 'print-page', style: { ...box, page: sizes.get(key) } },
+          el('img', { src: c.toDataURL('image/jpeg', 0.92), alt: '', style: box }), svg));
+      }
+      return { node: root, page: css + '@page { margin: 0; }' };
+    }
+
+    const api = { open, save, destroy, ext: 'pdf', kind: 'pdf', pages: pagesApi, printable };
     return api;
   }
   return { create };
