@@ -212,7 +212,7 @@ select.tb {
 .pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 10px 96px; min-width: min-content; }
 .pdf-page { position: relative; background: #fff; box-shadow: var(--page-shadow); flex: none; border-radius: 2px; }
 .pdf-page canvas { display: block; border-radius: 2px; }
-.pdf-page svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pdf-page > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .pdf-page.deleted { opacity: .3; }
 .pdf-page.deleted::after {
   content: "Se eliminará al guardar"; position: absolute; inset: 0; display: grid; place-items: center;
@@ -225,7 +225,34 @@ select.tb {
   border-radius: 8px; padding: 5px 8px; font-size: 12.5px;
 }
 .pdf-label button:active { background: var(--surface-3); }
-.draw-mode svg { touch-action: none; }
+.draw-mode .pdf-page > svg { touch-action: none; }
+
+/* Edición de PDF: selección, firma */
+.pdf-pages[data-tool="select"] .pdf-page > svg { cursor: default; }
+.pdf-pages[data-tool="text"] .pdf-page > svg { cursor: text; }
+.pdf-pages.draw-mode .pdf-page > svg { cursor: crosshair; }
+.sel-handle { cursor: nwse-resize; }
+.pdf-selbar {
+  position: absolute; transform: translateX(-50%); z-index: 5; display: flex; gap: 2px; padding: 4px;
+  background: var(--ink); color: var(--on-ink); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.25); white-space: nowrap;
+  animation: rise .15s ease;
+}
+.pdf-selbar button {
+  border: 0; background: transparent; color: inherit; height: 34px; padding: 0 10px; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500;
+}
+.pdf-selbar button:active, .pdf-selbar button:hover { background: color-mix(in srgb, var(--on-ink) 14%, transparent); }
+.pdf-selbar button.danger { color: #ff9b93; }
+@media (max-width: 380px) { .pdf-selbar button span:not(.ic) { display: none; } }
+.sign-body { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.sign-body .muted { color: var(--muted); font-size: 13.5px; align-self: flex-start; }
+.sign-pad { background: #fff; border: 1px dashed var(--line-strong); border-radius: 12px; touch-action: none; max-width: 100%; }
+.sign-tools { display: flex; gap: 8px; align-self: stretch; }
+.sign-tools .btn { flex: 1; }
+.form-row { display: flex; gap: 14px; align-items: flex-end; }
+.form-row > div { flex: 1; }
+.modal-card label.check { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--text); font-weight: 500; }
+.modal-card label.check input { width: 20px; height: 20px; accent-color: var(--ink); }
 
 /* =================== Excel =================== */
 .xl-wrap { display: flex; flex-direction: column; height: 100%; background: var(--surface); }

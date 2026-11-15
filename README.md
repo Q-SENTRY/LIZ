@@ -8,7 +8,7 @@ y funciona **sin conexión**. Los archivos se procesan solo en el teléfono; nun
 
 | Formato | Leer | Editar |
 |---|---|---|
-| **PDF** (.pdf) | Ver todas las páginas, zoom | Escribir texto, dibujar o firmar con el lápiz, resaltar, borrar anotaciones, girar y eliminar páginas |
+| **PDF** (.pdf) | Ver todas las páginas, zoom | Texto (tamaño, negrita, color), lápiz y resaltador, formas (rectángulo, círculo, línea, flecha), **corrector** para tapar texto, **imágenes** y **firma** dibujada con el dedo. Todo se puede **seleccionar, mover, cambiar de tamaño, duplicar o eliminar**. **Deshacer y rehacer** cualquier cambio (también girar o eliminar páginas). |
 | **Excel** (.xlsx, .xls, .csv, .ods) | Hojas, celdas y valores con formato | Editar celdas, fórmulas (SUMA/SUM, PROMEDIO/AVERAGE, MIN, MAX, CONTAR, SI, REDONDEAR…) que se recalculan al momento, autosuma, agregar, renombrar y eliminar hojas. Guarda como .xlsx, .csv u .ods |
 | **Word** (.docx, .txt) | Texto, títulos, listas, tablas e imágenes | Negrita, cursiva, subrayado, tachado, tamaño y color, resaltado, títulos, viñetas y numeración, alineación, insertar imágenes, tablas y enlaces. Guarda como .docx, .txt o .html |
 | **PowerPoint** (.pptx) | Diapositivas con fondos, imágenes, tablas y formato del texto | Editar el texto en su lugar, agregar, mover y eliminar cuadros de texto, duplicar y eliminar diapositivas, modo presentación a pantalla completa |
@@ -66,6 +66,17 @@ python3 -m http.server 8000
 | Hojas de cálculo | .xlsx .xlsm .xlsb .xls .xltx .ods .fods .csv .tsv **.numbers** .dif .slk .dbf .wk1–.wk4 .qpw .et |
 | Presentaciones | .pptx .pptm .ppsx .potx · **.ppt** y .odp (texto e imágenes de cada diapositiva) |
 | Imágenes | .jpg .png .webp .gif .bmp .svg (se abren como PDF para anotarlas) |
+
+## Editar un PDF
+
+1. **Seleccionar** (✥): toca un elemento para moverlo; el punto azul cambia su tamaño. La barra que aparece permite
+   **Editar** (textos), **Duplicar**, traer al frente o **Eliminar**. Doble toque sobre un texto para editarlo.
+2. **Texto**: toca donde quieras escribir. **Formas**: elige rectángulo, círculo, línea, flecha o **corrector**
+   (un recuadro blanco para tapar algo y escribir encima). **Imagen**: inserta una foto o logo. **Firma**: dibuja tu
+   firma; queda guardada para reutilizarla.
+3. **↶ Deshacer / ↷ Rehacer** en la barra (o Ctrl+Z / Ctrl+Y). Funciona con todo: añadir, mover, cambiar tamaño,
+   borrar, girar y eliminar páginas.
+4. Con **Ver** (flecha) desplazas el documento; en **Seleccionar** también puedes desplazarlo tocando fuera de los elementos.
 
 ## Navegar, imprimir y exportar a PDF
 
