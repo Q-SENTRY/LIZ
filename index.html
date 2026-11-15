@@ -47,11 +47,8 @@
           <button class="new-card" data-new="excel"><span class="tag t-xls">XLS</span><span class="new-name">Hoja de cálculo</span></button>
           <button class="new-card" data-new="ppt"><span class="tag t-ppt">PPT</span><span class="new-name">Presentación</span></button>
         </div>
-        <button id="btnMerge" class="tool-row">
-          <span class="tool-ic" data-icon="pages"></span>
-          <span class="tool-txt"><b>Unir PDF</b><small>Combina varios PDF o imágenes en un solo archivo</small></span>
-          <span class="open-arrow" data-icon="chevron"></span>
-        </button>
+        <h2 class="sec-title">Herramientas</h2>
+        <div id="toolsGrid" class="tools-grid"></div>
 
         <h2 class="sec-title">Recientes</h2>
         <ul id="recentList" class="recent"></ul>
@@ -106,10 +103,12 @@
 <script src="vendor/mammoth.browser.min.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/importers.js"></script>
+<script src="js/htmlpdf.js"></script>
 <script src="js/pdf-editor.js"></script>
 <script src="js/excel-editor.js"></script>
 <script src="js/word-editor.js"></script>
 <script src="js/ppt-editor.js"></script>
+<script src="js/tools.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -90,6 +90,23 @@ python3 -m http.server 8000
 - Al quitar o reordenar páginas se crea un PDF nuevo que copia solo lo necesario, así el archivo pesa menos.
   Si no cambias páginas, se conserva el PDF original (marcadores, formularios y metadatos).
 
+## Herramientas
+
+En la pantalla de inicio, sección **Herramientas** (todo se procesa en el teléfono, sin subir nada):
+
+| Herramienta | Qué hace |
+|---|---|
+| **Unir PDF** | Varios PDF o imágenes en un solo PDF, en el orden que elijas. |
+| **Comprimir PDF** | *Recomendada* y *Fuerte* reducen las imágenes internas y **conservan el texto seleccionable**; *Máxima* convierte las páginas en imágenes livianas. Muestra el tamaño antes y después. |
+| **Comprimir imágenes** | Varias a la vez, calidad Alta / Media / Liviana, en JPG o WebP. |
+| **Imágenes a PDF** | Ordena las fotos y elige hoja A4, Carta o del tamaño de la imagen, con o sin márgenes. |
+| **PDF a imágenes** | Cada página en JPG o PNG (96, 150 o 300 ppp), sueltas o en un ZIP. |
+| **Word a PDF** | .docx, .doc, .odt, .rtf, .md, .txt o .html a un PDF con **texto real** (seleccionable y liviano). |
+| **Excel a CSV** | Una hoja o todas, con separador punto y coma (Excel en español), coma o tabulación, en UTF-8. |
+
+Dentro de un PDF abierto, el menú ⋯ también tiene **Comprimir este PDF** y **Exportar páginas como imágenes**.
+En un documento, ⋯ › **Exportar como PDF** crea el PDF directamente.
+
 ## Zoom
 
 - **Pellizca con dos dedos** para acercar o alejar en PDF, presentaciones, documentos y hojas de cálculo. En documentos

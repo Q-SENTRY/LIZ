@@ -253,6 +253,7 @@ const UI = (() => {
     square: P('M4.5 4.5h15v15h-15z'),
     circle: P('M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z'),
     arrowRight: P('M4 12h15 M13 6l6 6-6 6'),
+    compress: P('M12 3v6 M9 6l3 3 3-3 M12 21v-6 M9 18l3-3 3 3 M4 12h16'),
     arrowUp: P('M12 20V5 M6 11l6-6 6 6'),
     whiteout: P('M4 7h16v10H4z M7 10.5h5 M7 13.5h8'),
     sign: P('M3 17c2.5 0 3.5-9 6-9s1 8 3.5 8 2-4 3.5-4 1.5 2 5 2 M3 21h18'),

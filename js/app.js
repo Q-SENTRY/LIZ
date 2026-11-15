@@ -335,6 +335,18 @@
   async function printDoc(asPdf) {
     if (!editor) return;
     if (asPdf && editor.kind === 'pdf') return onSave();
+    if (asPdf && editor.exportPdf) {
+      // documentos: PDF con texto real, directo a un archivo
+      loading(true, 'Creando PDF…');
+      try {
+        const blob = await editor.exportPdf();
+        const name = ($('#docName').value.trim() || 'documento').replace(/[\\/:*?"<>|]/g, '_') + '.pdf';
+        loading(false);
+        await download(blob, name);
+        if (!UI.android) toast('Guardado: ' + name);
+      } catch (e) { loading(false); UI.modal('No se pudo crear el PDF', String(e.message || e)); }
+      return;
+    }
     if (!editor.printable) return toast('Este documento no se puede imprimir');
     loading(true, 'Preparando…');
     try {
@@ -370,12 +382,23 @@
     if (editor.pages) opts.push({ label: `Ir a ${editor.pages.label.toLowerCase()}…`, value: 'goto', icon: 'pages' });
     if (editor.organizer) opts.push({ label: 'Organizar páginas (eliminar, mover, extraer)', value: 'org', icon: 'pages' });
     if (editor.appendPdf) opts.push({ label: 'Añadir otro PDF al final', value: 'append', icon: 'plus' });
+    if (editor.kind === 'pdf') {
+      opts.push({ label: 'Comprimir este PDF', value: 'compress', icon: 'compress' });
+      opts.push({ label: 'Exportar páginas como imágenes', value: 'toimg', icon: 'image' });
+    }
     opts.push({ label: 'Imprimir', value: 'print', icon: 'printer' });
     opts.push({ label: 'Exportar como PDF', value: 'pdf', icon: 'filePdf' });
     opts.push({ label: 'Compartir', value: 'share', icon: 'share' });
     const v = await choose('Opciones', opts);
     if (v === 'goto') openPageSheet();
     else if (v === 'org') editor.organizer();
+    else if (v === 'compress' || v === 'toimg') {
+      try {
+        const { blob, name } = await produce('pdf');
+        const f = { name, data: await blob.arrayBuffer() };
+        if (v === 'compress') Tools.compressPdf(f); else Tools.pdfToImages(f);
+      } catch (e) { UI.modal('Error', String(e.message || e)); }
+    }
     else if (v === 'append') appendFiles(await pickFiles('.pdf,application/pdf,image/*', true));
     else if (v === 'print') printDoc(false);
     else if (v === 'pdf') printDoc(true);
@@ -453,7 +476,13 @@
     e.target.value = '';
     if (f) openFile(f);
   });
-  document.getElementById('btnMerge').addEventListener('click', mergeFlow);
+  // Herramientas del inicio
+  const grid = document.getElementById('toolsGrid');
+  for (const t of Tools.LIST) {
+    grid.append(el('button', { class: 'tool-card', onclick: () => (t.id === 'merge' ? mergeFlow() : t.run()) },
+      el('span', { class: 'tool-ic' }, UI.icon(t.icon, 19)), el('span', { class: 'tool-txt' }, el('b', {}, t.label), el('small', {}, t.desc))));
+  }
+  Tools.setOpener((name, bytes) => openData(name, bytes));
   document.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => {
     const kind = b.dataset.new;
     const names = { word: 'Documento.docx', excel: 'Libro.xlsx', ppt: 'Presentación.pptx' };

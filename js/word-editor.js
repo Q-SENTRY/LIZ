@@ -667,7 +667,15 @@ const WordEditor = (() => {
       }
     }
 
+    /** Exportar como PDF con texto real */
+    async function exportPdf(size = 'letter') {
+      const r = await HtmlPdf.render(page, { size, title: document.getElementById('docName').value });
+      if (r.replaced) setTimeout(() => UI.toast('Algunos caracteres no existen en la fuente del PDF y se guardaron como «?».', 4500), 500);
+      return new Blob([r.bytes], { type: 'application/pdf' });
+    }
+
     const api = {
+      exportPdf,
       zoom: { get: () => zoom, set: z => setZoom(z), min: 0.6, max: 3, target: () => page, cssZoom: true },
       pages: pagesApi, printable,
       open, save, ext: 'docx', kind: 'word',
@@ -677,5 +685,23 @@ const WordEditor = (() => {
     return api;
   }
 
-  return { create, htmlToDocx };
+  /** HTML de cualquier documento (para convertirlo a PDF sin abrir el editor) */
+  async function documentHtml(data, name) {
+    const div = document.createElement('div');
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    if (['docx', 'docm', 'dotx', 'dotm'].includes(ext)) {
+      const res = await mammoth.convertToHtml({ arrayBuffer: data }, {
+        styleMap: ['u => u', 'strike => s', 'highlight => mark', "p[style-name='Title'] => h1.doc-title:fresh", "p[style-name='Subtitle'] => h2.doc-subtitle:fresh"],
+        includeDefaultStyleMap: true
+      });
+      div.innerHTML = res.value || '<p></p>';
+      try { await enrichFromDocx(div, data); } catch {}
+    } else {
+      const r = await Importers.toDocument(data, name);
+      div.innerHTML = r.html;
+    }
+    return div;
+  }
+
+  return { create, htmlToDocx, documentHtml };
 })();
