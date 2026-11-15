@@ -16,7 +16,32 @@ y funciona **sin conexión**. Los archivos se procesan solo en el teléfono; nun
 También puedes **crear** documentos, hojas de cálculo y presentaciones nuevas, **compartir** el archivo
 (WhatsApp, correo, Drive…) con el botón ⤴, y volver a abrir los **archivos recientes**.
 
-## Cómo instalarla en el celular
+## App para Android (APK)
+
+El archivo listo para instalar está en **`dist/Folio.apk`** (Android 7 o superior).
+
+**Instalarlo en el celular:**
+1. Descarga `Folio.apk` en el teléfono.
+2. Ábrelo desde *Descargas*. Si Android lo pide, permite *Instalar apps desconocidas* para tu navegador o gestor de archivos.
+3. Toca *Instalar*. Aparecerá **Folio** en tus apps.
+
+La app funciona sin internet. Además de lo que hace la versión web:
+- **Guardar** deja el archivo en *Descargas › Folio*.
+- **Compartir** abre el menú de Android (WhatsApp, Gmail, Drive…).
+- En cualquier app puedes elegir **Abrir con › Folio** o **Compartir › Folio** para un PDF, Word, Excel o PowerPoint.
+
+**Volver a compilar el APK** (Ubuntu/Debian, sin Android Studio):
+
+```bash
+sudo apt-get install -y openjdk-17-jdk android-sdk-platform-23 aapt zipalign apksigner dalvik-exchange
+./android/build-apk.sh        # genera dist/Folio.apk
+```
+
+El APK se firma con la llave `android/folio-release.jks`, que **no se guarda en el repositorio** por seguridad
+(si no existe, el script crea una nueva). Para que una versión nueva se instale encima de la anterior hay que
+firmarla con la misma llave; con una llave distinta, primero hay que desinstalar la versión anterior.
+
+## Usarla como app web (sin APK)
 
 1. Publica esta carpeta en cualquier hosting estático con HTTPS. La forma más fácil es **GitHub Pages**:
    en el repositorio ve a *Settings → Pages*, elige la rama y la carpeta `/ (root)` y guarda.

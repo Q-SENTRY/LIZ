@@ -106,9 +106,9 @@
     }
     try {
       const { blob, name } = await produce(fmt);
-      download(blob, name);
+      await download(blob, name);
       if (fmt === editor.ext) { isDirty = false; recent.add(name, await blob.arrayBuffer()); }
-      toast('Guardado: ' + name);
+      if (!UI.android) toast('Guardado: ' + name);
     } catch (e) {
       console.error(e);
       UI.modal('Error al guardar', String(e.message || e));
@@ -187,7 +187,17 @@
 
   renderRecent();
 
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // Documentos recibidos desde otras apps de Android ("Abrir con Folio")
+  window.__folioOpenUrl = async (url, name) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      if (editor) closeEditor();
+      openFile(new File([blob], name, { type: blob.type }));
+    } catch (e) { UI.modal('No se pudo abrir', String(e.message || e)); }
+  };
+
+  if ('serviceWorker' in navigator && location.protocol !== 'file:' && !UI.android) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 

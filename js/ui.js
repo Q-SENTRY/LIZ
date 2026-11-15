@@ -88,7 +88,23 @@ const UI = (() => {
     });
   }
 
-  function download(blob, name) {
+  /* ---------- Integración con la app Android (APK) ---------- */
+  const android = typeof window.FolioAndroid !== 'undefined';
+  function blobToBase64(blob) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1] || '');
+      r.onerror = () => rej(r.error);
+      r.readAsDataURL(blob);
+    });
+  }
+
+  async function download(blob, name) {
+    if (android) {
+      const saved = window.FolioAndroid.saveFile(name, blob.type || 'application/octet-stream', await blobToBase64(blob));
+      if (saved) toast('Guardado en Descargas › Folio: ' + name, 3500);
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const a = el('a', { href: url, download: name });
     document.body.append(a);
@@ -98,6 +114,7 @@ const UI = (() => {
   }
 
   async function share(blob, name) {
+    if (android) { window.FolioAndroid.shareFile(name, blob.type || 'application/octet-stream', await blobToBase64(blob)); return true; }
     const file = new File([blob], name, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file], title: name }); return true; }
@@ -217,5 +234,5 @@ const UI = (() => {
     return el('button', { class: 'tb' + (label ? ' tb-l' : ''), title, 'aria-label': title, onclick, ...attrs }, icon(iconName), label ? el('span', {}, label) : null);
   }
 
-  return { icon, tbBtn, $, el, toast, loading, modal, prompt, confirm, choose, download, share, xmlEsc, readFile, recent };
+  return { android, icon, tbBtn, $, el, toast, loading, modal, prompt, confirm, choose, download, share, xmlEsc, readFile, recent };
 })();
